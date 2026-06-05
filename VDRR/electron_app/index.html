@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; frame-src 'self' data: blob:;">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            background: #1e1e1e;
+            color: white;
+            font-family: sans-serif;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 🔥 SECURE VIEW MODE: Blocks Copy/Paste & Text Selection */
+        .read-only-mode {
+            user-select: none;
+            -webkit-user-select: none;
+            pointer-events: auto;
+            /* Allows scrolling but limits interaction */
+        }
+
+        /* EXCEL STYLES */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            background: white;
+            color: black;
+        }
+
+        td,
+        th {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+
+        #login-screen,
+        #auth-screen {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            flex-direction: column;
+        }
+
+        .login-box {
+            background: #2d2d2d;
+            padding: 40px;
+            border-radius: 8px;
+            text-align: center;
+            width: 350px;
+        }
+
+        .login-box input {
+            width: 90%;
+            padding: 12px;
+            margin: 10px 0;
+            border: none;
+            background: #1e1e1e;
+            color: white;
+        }
+
+        .btn {
+            background: #007acc;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+
+        .btn:hover {
+            background: #005f9e;
+        }
+
+        #viewer-container {
+            height: calc(100vh - 60px);
+            overflow: auto;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .toolbar {
+            height: 60px;
+            background: #2d2d2d;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 10px;
+            border-bottom: 2px solid #444;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="login-screen" class="hidden">
+        <div class="login-box">
+            <h2>Secure Kiosk Login</h2>
+            <input type="email" id="email" placeholder="Email Address">
+            <input type="password" id="password" placeholder="Password">
+            <button id="login-btn" class="btn" style="width: 100%; margin-top: 15px;">Authenticate</button>
+            <div id="login-error" style="color: #ff4d4d; margin-top: 10px;"></div>
+        </div>
+    </div>
+
+    <div id="auth-screen" class="hidden">
+        <h2>System Ready</h2>
+        <p>Double-click a .vdr file to view content.</p>
+        <button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 20px;">Switch User / Log
+            Out</button>
+    </div>
+
+    <div id="main-app" class="hidden">
+        <div class="toolbar">
+            <button id="edit-btn" class="btn"
+                style="background: #ffc107; color: black; font-weight: bold; display: none;">✏️ Enable Edit
+                Mode</button>
+            <div id="edit-tools" class="hidden" style="display: flex; gap: 10px;">
+                <span style="padding-top: 10px; color: #ffc107;">Editing Unlocked! (Copy/Paste Enabled)</span>
+                <button id="save-btn" class="btn" style="background: #28a745;">💾 Save Changes to Server</button>
+            </div>
+        </div>
+
+        <div id="viewer-container" class="read-only-mode"></div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+
+</html>

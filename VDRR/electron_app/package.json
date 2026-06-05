@@ -1,0 +1,39 @@
+{
+  "name": "vdr-secure-reader",
+  "version": "1.0.0",
+  "description": "Enterprise Secure VDR Reader",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.yourcompany.vdr",
+    "productName": "VDR Secure Reader",
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "fileAssociations": [
+      {
+        "ext": "vdr",
+        "name": "VDR Encrypted Keycard",
+        "description": "Secure Virtual Data Room File",
+        "role": "Viewer"
+      }
+    ]
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.106.2",
+    "dotenv": "^16.6.1",
+    "fernet": "^0.3.3",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1"
+  }
+}

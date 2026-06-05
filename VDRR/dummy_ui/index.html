@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VDR Secure Portal</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f4f7f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            width: 400px;
+        }
+
+        h2 {
+            text-align: center;
+            color: #007acc;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #005f9e;
+        }
+
+        .logout-btn {
+            background: #dc3545;
+            margin-top: 15px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        /* 🔥 SECURE VIEW MODE: Blocks Copy/Paste & Text Selection */
+        .read-only-mode {
+            user-select: none;
+            -webkit-user-select: none;
+            pointer-events: auto;
+        }
+
+        /* 🔥 THE ANTI-LEAK FIX: If they hit Ctrl+P, print a blank page! */
+        @media print {
+            body {
+                display: none !important;
+            }
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #eee;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+
+        .download-btn {
+            width: auto;
+            background: #28a745;
+            padding: 6px 12px;
+            margin: 0;
+        }
+
+        #error-msg {
+            color: red;
+            text-align: center;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="login-screen" class="container">
+        <h2>VDR Portal Login</h2>
+        <input type="email" id="email" placeholder="Email">
+        <input type="password" id="password" placeholder="Password">
+        <button onclick="login()">Authenticate</button>
+        <div id="error-msg"></div>
+    </div>
+
+    <div id="admin-screen" class="container hidden" style="width: 500px;">
+        <h2>Vault Manager</h2>
+
+        <input type="text" id="doc-name" placeholder="Document Name (e.g., Q4 Report)">
+        <input type="file" id="file-upload" style="margin-bottom: 20px;">
+
+        <h4 style="margin-bottom: 5px; color: #555;">Assign Access:</h4>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <thead>
+                <tr style="background: #eee; text-align: left;">
+                    <th style="padding: 8px;">User</th>
+                    <th>View</th>
+                    <th>Edit</th>
+                </tr>
+            </thead>
+            <tbody id="user-table-body">
+            </tbody>
+        </table>
+
+        <button onclick="uploadDoc()">Encrypt & Assign Access</button>
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+    <div id="user-screen" class="container hidden">
+        <h2>My Secure Vault</h2>
+        <div id="file-list"></div>
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+
+    <script>
+        let currentUser = null;
+
+        async function login() {
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value.trim();
+            const errorMsg = document.getElementById('error-msg');
+
+            errorMsg.innerText = "Authenticating...";
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    currentUser = data.user;
+                    document.getElementById('login-screen').classList.add('hidden');
+
+                    if (currentUser.email.includes('admin')) {
+                        loadAdmin();
+                    } else {
+                        loadUser();
+                    }
+                } else {
+                    errorMsg.innerText = data.detail || "Login failed.";
+                }
+            } catch (err) {
+                errorMsg.innerText = "Server offline.";
+            }
+        }
+
+        async function loadAdmin() {
+            document.getElementById('admin-screen').classList.remove('hidden');
+            const res = await fetch(`/api/users/${currentUser.company_id}`);
+            const data = await res.json();
+
+            const tbody = document.getElementById('user-table-body');
+            tbody.innerHTML = ''; // Clear it out
+
+            data.users.forEach(u => {
+                // Don't list the admin themselves in the permissions table
+                if (u.id === currentUser.id) return;
+
+                tbody.innerHTML += `
+                    <tr data-uid="${u.id}" style="border-bottom: 1px solid #ddd;">
+                        <td style="padding: 10px;"><b>${u.name}</b><br><span style="font-size:12px; color:gray;">${u.email}</span></td>
+                        <td><input type="checkbox" class="can-read-box"></td>
+                        <td><input type="checkbox" class="can-edit-box"></td>
+                    </tr>
+                `;
+            });
+        }
+
+        async function uploadDoc() {
+            const fileInput = document.getElementById('file-upload');
+            const docName = document.getElementById('doc-name').value.trim();
+
+            if (!fileInput.files.length || !docName) return alert("Provide a document name and select a file.");
+
+            // Scrape the table to see who is checked!
+            const permissions = [];
+            const rows = document.querySelectorAll('#user-table-body tr');
+
+            rows.forEach(row => {
+                const canRead = row.querySelector('.can-read-box').checked;
+                const canEdit = row.querySelector('.can-edit-box').checked;
+
+                if (canRead || canEdit) {
+                    permissions.push({
+                        user_id: row.getAttribute('data-uid'),
+                        can_read: canRead,
+                        can_edit: canEdit
+                    });
+                }
+            });
+
+            if (permissions.length === 0) return alert("You must grant access to at least one user!");
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+            formData.append("doc_name", docName);
+            formData.append("permissions_json", JSON.stringify(permissions)); // Package the grid into JSON
+            formData.append("admin_id", currentUser.id);
+            formData.append("company_id", currentUser.company_id);
+
+            const res = await fetch('/api/upload', { method: 'POST', body: formData });
+
+            if (res.ok) {
+                alert("File encrypted and access granted!");
+                document.getElementById('doc-name').value = '';
+                document.getElementById('file-upload').value = '';
+                loadAdmin(); // Reload to uncheck the boxes
+            } else {
+                alert("Upload failed.");
+            }
+        }
+
+        async function loadUser() {
+            document.getElementById('user-screen').classList.remove('hidden');
+            const res = await fetch(`/api/files/${currentUser.id}`);
+            const data = await res.json();
+
+            const list = document.getElementById('file-list');
+            list.innerHTML = '';
+
+            if (!data.files.length) return list.innerHTML = "No files found.";
+
+            data.files.forEach(f => {
+                const doc = f.documents;
+                list.innerHTML += `
+                    <div class="file-item">
+                        <span>📄 ${doc.name}</span>
+                        <a href="/api/download/${doc.id}/${doc.name}">
+                            <button class="download-btn">Download .vdr</button>
+                        </a>
+                    </div>
+                `;
+            });
+        }
+
+        function logout() {
+            currentUser = null;
+            document.getElementById('email').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('admin-screen').classList.add('hidden');
+            document.getElementById('user-screen').classList.add('hidden');
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('error-msg').innerText = '';
+        }
+    </script>
+</body>
+
+</html>

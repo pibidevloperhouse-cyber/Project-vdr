@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <!-- <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"> -->
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-src 'self' data: blob:;">
+    <style>
+        body {
+            margin: 0;
+            background: #1e1e1e;
+            color: white;
+            font-family: sans-serif;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Login Screen Styles */
+        #login-screen {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: #121212;
+        }
+
+        .login-box {
+            background: #2d2d2d;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            width: 350px;
+            text-align: center;
+        }
+
+        .login-box input {
+            width: 90%;
+            padding: 12px;
+            margin: 10px 0;
+            border: 1px solid #444;
+            background: #1e1e1e;
+            color: white;
+            border-radius: 4px;
+        }
+
+        .login-box button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 15px;
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .login-box button:hover {
+            background: #005f9e;
+        }
+
+        #login-error {
+            color: #ff4d4d;
+            margin-top: 15px;
+            font-size: 14px;
+            min-height: 20px;
+        }
+
+        /* Viewer Styles */
+        #viewer-container {
+            height: calc(100vh - 50px);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 20px;
+        }
+
+        .page {
+            background: white;
+            color: black;
+            width: 800px;
+            min-height: 1050px;
+            margin-bottom: 30px;
+            padding: 60px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.8);
+        }
+
+        .toolbar {
+            height: 50px;
+            background: #2d2d2d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+            border-top: 1px solid #444;
+        }
+
+        .btn {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            display: none;
+        }
+
+        #auth-screen {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-size: 24px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="login-screen" class="hidden">
+        <div class="login-box">
+            <h2>Secure Kiosk Login</h2>
+            <input type="email" id="email" placeholder="Email Address">
+            <input type="password" id="password" placeholder="Password">
+            <button id="login-btn">Authenticate</button>
+            <div id="login-error"></div>
+        </div>
+    </div>
+
+    <div id="auth-screen" class="hidden" style="text-align: center; padding: 50px;">
+        <h2>System Ready</h2>
+        <p>Double-click a .vdr file to view content.</p>
+
+        <button id="logout-btn"
+            style="background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin-top: 20px;">
+            Switch User / Log Out
+        </button>
+    </div>
+    <div id="main-app" class="hidden">
+        <div id="viewer-container"></div>
+        <div class="toolbar">
+            <div id="page-counter">Page 1</div>
+            <div>
+                <button id="edit-btn" class="btn">Edit Document</button>
+                <button id="save-btn" class="btn" style="background: #28a745;">Save Changes to DB</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+
+</html>

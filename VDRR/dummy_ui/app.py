@@ -12,8 +12,8 @@ import uvicorn
 app = FastAPI()
 
 # 1. Supabase Secure Connection (REPLACE WITH YOUR KEYS)
-URL = "https://rkrcemzisyoaewocqtlh.supabase.co"
-KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJrcmNlbXppc3lvYWV3b2NxdGxoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDEzMDM5NywiZXhwIjoyMDk1NzA2Mzk3fQ.BG7fHku_h5mAQIfyRyqm9fqNwgO4UporHxYMPFNEBvY"
+URL="https://xxlawcufvetxygaqwoxi.supabase.co"
+KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4bGF3Y3VmdmV0eHlnYXF3b3hpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NDE3MzgsImV4cCI6MjA5NDMxNzczOH0.yw7i6-U8xuzdQy0vj9CsXnOjIj5iwO4F3BbsC1cuBaU"
 supabase: Client = create_client(URL, KEY)
 
 class LoginData(BaseModel):
@@ -42,11 +42,14 @@ def get_users(company_id: str):
 # ---------------------------------------------------------
 # THE CLOUD UPLOAD ENDPOINT (Now with Extension & MIME Sniffing!)
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# THE CLOUD UPLOAD ENDPOINT (Now 100% Synced with Next.js DB!)
+# ---------------------------------------------------------
 @app.post("/api/upload")
 async def upload_doc(
     file: UploadFile = File(...),
     doc_name: str = Form(...),
-    permissions_json: str = Form(...), # Accepts the JSON array of checked users
+    permissions_json: str = Form(...), 
     admin_id: str = Form(...),
     company_id: str = Form(...)
 ):
@@ -59,7 +62,10 @@ async def upload_doc(
         file_bytes = await file.read()
         safe_b64_bytes = base64.b64encode(file_bytes)
         
-        # Encrypt the safe text, not the raw binary!
+        # 🔥 THE FIX: Calculate the exact file size in bytes for the Next.js database!
+        file_size = len(file_bytes)
+        
+        # Encrypt the safe text
         encrypted_data = cipher_suite.encrypt(safe_b64_bytes)
 
         # C. Upload the encrypted bytes DIRECTLY to Supabase Storage
@@ -72,30 +78,28 @@ async def upload_doc(
             file_options={"content-type": "application/octet-stream"}
         )
 
-        # 🔥 THE FIX: Extract the true extension from the Admin's physical file
         original_ext = ""
         if file.filename and "." in file.filename:
             original_ext = f".{file.filename.split('.')[-1].lower()}"
 
-        # Automatically append the extension if the Admin forgot to type it!
         final_doc_name = doc_name if doc_name.lower().endswith(original_ext) else f"{doc_name}{original_ext}"
 
-        # D. Save to database using the fixed name AND storing the MIME type
+        # D. Save to database WITH the strict Next.js required columns
         doc_res = supabase.table("documents").insert({
             "company_id": company_id,
             "uploaded_by": admin_id,
-            "name": final_doc_name,                # Perfectly formatted name!
+            "name": final_doc_name,                
             "file_path": storage_path,
-            "mime_type": file.content_type,        # Storing the exact OS MIME type!
+            "mime_type": file.content_type,        
+            "file_size_bytes": file_size, # 🔥 NEXT.JS REQUIRED COLUMN ADDED
             "dek_ref": encryption_key.decode('utf-8')
         }).execute()
         
         new_doc = doc_res.data[0]
         
-        # E. The Upgrade: Loop through the checked users and assign access!
+        # E. Assign Permissions
         permissions = json.loads(permissions_json)
         for p in permissions:
-            # If they can edit, we automatically guarantee they can read
             can_read = True if p.get("can_edit") else p.get("can_read", False)
             
             supabase.table("document_permissions").insert({
@@ -109,7 +113,6 @@ async def upload_doc(
     except Exception as e:
         print(f"Upload Error: {str(e)}") 
         raise HTTPException(status_code=500, detail=str(e))
-
 
 # ---------------------------------------------------------
 # THE UPDATE ENDPOINT (Called by Electron when user hits "Save")

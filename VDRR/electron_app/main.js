@@ -7,8 +7,8 @@ const WebSocket = require('ws');
 const fernet = require('fernet');
 
 // 1. Initialize Supabase
-const SUPABASE_URL = "https://rkrcemzisyoaewocqtlh.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJrcmNlbXppc3lvYWV3b2NxdGxoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDEzMDM5NywiZXhwIjoyMDk1NzA2Mzk3fQ.BG7fHku_h5mAQIfyRyqm9fqNwgO4UporHxYMPFNEBvY";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
     global: { WebSocket: WebSocket }

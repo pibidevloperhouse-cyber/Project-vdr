@@ -1,10 +1,15 @@
+# Block node modules anywhere in the project recursively
+**/node_modules/
 node_modules/
-dist/
-build/
-out/
-.env
-*.log
-.DS_Store
 
+# Block build and distribution folders anywhere
+**/dist/
+**/build/
+**/out/
+**/.next/
+
+# Block environment secrets and system junk
+.env
 .env.local
 *.log
+.DS_Store

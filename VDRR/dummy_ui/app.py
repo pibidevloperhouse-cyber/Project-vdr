@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 from cryptography.fernet import Fernet
 import uvicorn
+import bcrypt
 
 
 app = FastAPI()
@@ -23,20 +24,72 @@ class LoginData(BaseModel):
 # 2. API ENDPOINTS
 @app.post("/api/login")
 def login(data: LoginData):
-    res = supabase.table("users").select("*").eq("email", data.email).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="User not found.")
+    # res = supabase.table("users").select("*").eq("email", data.email).execute()
+    # if not res.data:
+    #     raise HTTPException(status_code=404, detail="User not found.")
     
-    user = res.data[0]
-    if user["password_hash"] != data.password:
-        raise HTTPException(status_code=401, detail="Invalid password.")
+    # user = res.data[0]
+    # if user["password_hash"] != data.password:
+    #     raise HTTPException(status_code=401, detail="Invalid password.")
         
-    return {"success": True, "user": user}
+    # return {"success": True, "user": user}
+    try:
+        # 1. Fetch the user from Supabase using their email
+        response = supabase.table("users").select("*").eq("email", data.email).execute()
+        
+        # 2. If the database returns empty, the user doesn't exist
+        if not response.data or len(response.data) == 0:
+            raise HTTPException(status_code=401, detail="User not found")
+            
+        # 3. 🔥 FIX: Define the 'user' variable by grabbing the first row from the DB response
+        user = response.data[0]
+        
+        # Now Python knows exactly what 'user' is!
+        db_password = user["password_hash"]
+        input_password = data.password.encode('utf-8')
+        
+        
 
-@app.get("/api/users/{company_id}")
-def get_users(company_id: str):
-    res = supabase.table("users").select("id, name, email").eq("company_id", company_id).execute()
-    return {"users": res.data}
+        # 👇 ADD THESE THREE LINES 👇
+        print(f"--- DEBUGGING LOGIN ---")
+        print(f"Email Typed: '{data.email}'")
+        print(f"Password Typed: '{data.password}'")
+        print(f"Password in DB: '{db_password}'")
+        print(f"-----------------------")
+
+        # 4. Check if it's a secure Next.js Hash (bcrypt)...
+
+        # 4. Check if it's a secure Next.js Hash (bcrypt)
+        if db_password.startswith("$2b$") or db_password.startswith("$2a$"):
+            # Use bcrypt library to verify
+            if bcrypt.checkpw(input_password, db_password.encode('utf-8')):
+                print("Logged in via Bcrypt Hash!")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid Credentials")
+                
+        # 5. Otherwise, check if it is our raw dummy data (like "pass123")
+        else:
+            if data.password == db_password:
+                print("Logged in via Dummy Password!")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid Credentials")
+
+        # 6. Success! Return the user data to the frontend
+        return {
+            "success": True, 
+            "user_id": user["id"], 
+            "role": user["role"], 
+            "email": user["email"]
+        }
+
+    except Exception as e:
+        print(f"Login Error: {str(e)}")
+        # If it's already an HTTPException (like our 401s above), just raise it
+        if isinstance(e, HTTPException):
+            raise e
+        # Otherwise, wrap it in a 500 error
+        raise HTTPException(status_code=500, detail=str(e))
+    
 
 
 # ---------------------------------------------------------

@@ -1,4 +1,14 @@
+// preload.js
 const { contextBridge, ipcRenderer } = require('electron');
+
+console.log("PRELOAD: Bridge is initializing..."); // You MUST see this in DevTools
+
+contextBridge.exposeInMainWorld('api', {
+    login: (credentials) => {
+        console.log("PRELOAD: Sending login data:", credentials); // Debug here!
+        return ipcRenderer.invoke('login', credentials);
+    },
+});
 
 contextBridge.exposeInMainWorld('api', {
     login: (credentials) => ipcRenderer.invoke('login', credentials),

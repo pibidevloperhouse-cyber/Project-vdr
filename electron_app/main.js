@@ -6,9 +6,16 @@ const { createClient } = require('@supabase/supabase-js');
 const WebSocket = require('ws');
 const fernet = require('fernet');
 
+
+const logPath = path.join(process.env.USERPROFILE, 'Desktop', 'vdr_debug.log');
+
+console.log = (msg) => {
+    fs.appendFileSync(logPath, new Date().toISOString() + ': ' + msg + '\n');
+};
+
 // 1. Initialize Supabase
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const SUPABASE_URL = 'https://your-project-id.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4bGF3Y3VmdmV0eHlnYXF3b3hpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NDE3MzgsImV4cCI6MjA5NDMxNzczOH0.yw7i6-U8xuzdQy0vj9CsXnOjIj5iwO4F3BbsC1cuBaaU';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
     global: { WebSocket: WebSocket }
@@ -51,7 +58,7 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js')
         }
     });
-
+    mainWindow.webContents.openDevTools();
     mainWindow.loadFile('index.html');
     mainWindow.webContents.on('zoom-changed', (event, zoomDirection) => {
         let currentZoom = mainWindow.webContents.getZoomLevel();
@@ -71,41 +78,127 @@ app.on('second-instance', (event, commandLine) => {
 app.whenReady().then(createWindow);
 
 ipcMain.handle('get-startup-file', () => fileToOpen ? parseVdrFile(fileToOpen) : null);
-
 ipcMain.handle('login', async (event, { email, password }) => {
     try {
-        const { data: user, error } = await supabase.from('users').select('id, password_hash').eq('email', email).single();
-        if (error || !user) throw new Error('User not found.');
-        if (user.password_hash !== password) throw new Error('Invalid password.');
-        return { success: true, userId: user.id };
-    } catch (error) { return { success: false, error: error.message }; }
+        // 1. Sanitize input: Remove accidental spaces and force lowercase
+        const cleanEmail = email.trim().toLowerCase();
+
+        console.log("DEBUG: Querying DB for Email:", cleanEmail);
+
+        // 2. Fetch from Supabase
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('id, name, email, password_hash, role')
+            .eq('email', cleanEmail) // Using sanitized email
+            .single();
+
+        if (error) {
+            console.error("DEBUG: DB Error:", error.message);
+            return { success: false, message: "DB Error: " + error.message };
+        }
+
+        if (!user) {
+            console.error("DEBUG: No user returned from query.");
+            return { success: false, message: "User not found" };
+        }
+
+        // 3. Debug Password comparison
+        console.log("DEBUG: Found user:", user.id);
+        if (user.password_hash !== password) {
+            console.error("DEBUG: Password mismatch!");
+            return { success: false, message: "Invalid password" };
+        }
+
+        return { success: true, user: user };
+    } catch (err) {
+        console.error("DEBUG: Catch Error:", err);
+        return { success: false, message: err.message };
+    }
 });
 
 
 // Step 2: Verify Access, Download, and Decrypt
+// ipcMain.handle('verify-access', async (event, { userId, docId }) => {
+//     try {
+//         if (!docId) throw new Error('No document ID provided. Please open a valid .vdr file.');
+
+//         // 1. Fetch File Metadata FIRST (We added 'uploaded_by' here)
+//         const { data: doc, error: docErr } = await supabase
+//             .from('documents')
+//             .select('file_path, dek_ref, name, uploaded_by')
+//             .eq('id', docId)
+//             .single();
+
+//         if (docErr || !doc?.file_path) throw new Error('Access Denied: File metadata not found.');
+
+//         // 2. THE ADMIN BYPASS LOGIC
+//         let canRead = false;
+//         let canEdit = false;
+
+//         if (doc.uploaded_by === userId) {
+//             // 🔥 Admin Bypass! If you uploaded this file, you get 100% full access.
+//             canRead = true;
+//             canEdit = true;
+//         } else {
+//             // Normal User Permission Check
+//             const { data: perm, error: permErr } = await supabase
+//                 .from('document_permissions')
+//                 .select('can_read, can_edit')
+//                 .eq('user_id', userId)
+//                 .eq('doc_id', docId)
+//                 .single();
+
+//             if (permErr || !perm?.can_read) throw new Error('Access Denied: No Read Permission');
+//             canRead = perm.can_read;
+//             canEdit = perm.can_edit;
+//         }
+
+//         if (!canRead) throw new Error("Access Denied.");
+
+//         // 3. Download and Decrypt
+//         const { data: fileData, error: downloadErr } = await supabase.storage.from('vault').download(doc.file_path);
+//         if (downloadErr) throw new Error('Failed to download encrypted file from secure cloud vault.');
+
+//         const encryptedText = await fileData.text();
+//         const secret = new fernet.Secret(doc.dek_ref);
+//         const token = new fernet.Token({ token: encryptedText, secret: secret, ttl: 0 });
+//         const decryptedContent = token.decode();
+
+//         await supabase.from('document_access_logs').insert([{ user_id: userId, document_id: docId }]);
+
+//         return { success: true, canEdit: canEdit, fileName: doc.name, content: decryptedContent };
+//     } catch (error) {
+//         return { success: false, error: error.message };
+//     }
+// });
+
+const crypto = require('crypto'); // Ensure this is at the top of main.js
+
 ipcMain.handle('verify-access', async (event, { userId, docId }) => {
     try {
-        if (!docId) throw new Error('No document ID provided. Please open a valid .vdr file.');
+        console.log("DEBUG: Verifying access for User:", userId, "Doc:", docId);
 
-        // 1. Fetch File Metadata FIRST (We added 'uploaded_by' here)
+        // 1. Fetch File Metadata
         const { data: doc, error: docErr } = await supabase
             .from('documents')
             .select('file_path, dek_ref, name, uploaded_by')
             .eq('id', docId)
             .single();
 
-        if (docErr || !doc?.file_path) throw new Error('Access Denied: File metadata not found.');
+        if (docErr) {
+            console.error("DEBUG DB ERROR:", docErr);
+            throw new Error('File metadata not found in database.');
+        }
 
-        // 2. THE ADMIN BYPASS LOGIC
+        // 2. Permission Check
         let canRead = false;
         let canEdit = false;
 
+        // Admin Bypass
         if (doc.uploaded_by === userId) {
-            // 🔥 Admin Bypass! If you uploaded this file, you get 100% full access.
             canRead = true;
             canEdit = true;
         } else {
-            // Normal User Permission Check
             const { data: perm, error: permErr } = await supabase
                 .from('document_permissions')
                 .select('can_read, can_edit')
@@ -113,30 +206,44 @@ ipcMain.handle('verify-access', async (event, { userId, docId }) => {
                 .eq('doc_id', docId)
                 .single();
 
-            if (permErr || !perm?.can_read) throw new Error('Access Denied: No Read Permission');
+            if (permErr) {
+                console.error("DEBUG PERM ERROR:", permErr);
+                throw new Error('No permission record found.');
+            }
             canRead = perm.can_read;
             canEdit = perm.can_edit;
         }
 
-        if (!canRead) throw new Error("Access Denied.");
+        if (!canRead) throw new Error('Access Denied: No Read Permission');
 
-        // 3. Download and Decrypt
-        const { data: fileData, error: downloadErr } = await supabase.storage.from('vault').download(doc.file_path);
-        if (downloadErr) throw new Error('Failed to download encrypted file from secure cloud vault.');
+        // 3. Download from Bucket
+        const { data: fileData, error: downloadErr } = await supabase.storage
+            .from('vault-files')
+            .download(doc.file_path);
 
-        const encryptedText = await fileData.text();
-        const secret = new fernet.Secret(doc.dek_ref);
-        const token = new fernet.Token({ token: encryptedText, secret: secret, ttl: 0 });
-        const decryptedContent = token.decode();
+        if (downloadErr) throw new Error('Failed to download from vault.');
+
+        // 4. 🔥 CORRECT AES-GCM DECRYPTION (Replaces Fernet)
+        const fileBuffer = Buffer.from(await fileData.arrayBuffer());
+        const [ivBase64, keyBase64] = doc.dek_ref.split(':');
+
+        const iv = Buffer.from(ivBase64, 'base64');
+        const key = Buffer.from(keyBase64, 'base64');
+
+        // Decrypt
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        // If your encryption adds an auth tag (it should with GCM), you might need to handle it.
+        // For simplicity, we assume standard GCM block decryption:
+        const decrypted = Buffer.concat([decipher.update(fileBuffer), decipher.final()]);
 
         await supabase.from('document_access_logs').insert([{ user_id: userId, document_id: docId }]);
 
-        return { success: true, canEdit: canEdit, fileName: doc.name, content: decryptedContent };
+        return { success: true, canEdit, fileName: doc.name, content: decrypted.toString('base64') };
     } catch (error) {
+        console.error("DEBUG FINAL ERROR:", error.message);
         return { success: false, error: error.message };
     }
 });
-
 
 
 // ipcMain.handle('verify-access', async (event, { userId, docId }) => {

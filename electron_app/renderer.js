@@ -4,19 +4,41 @@ window.addEventListener('contextmenu', (e) => e.preventDefault());
 let currentActiveDocId = null;
 let currentExtension = "";
 
-// 🔥 1. SAFE BOOT SEQUENCE (Prevents Blank Screen)
+// 🔥 OS-LEVEL SECURITY: The Blur Shield
+const blurShield = document.createElement('div');
+blurShield.style.position = 'fixed';
+blurShield.style.top = '0'; blurShield.style.left = '0';
+blurShield.style.width = '100vw'; blurShield.style.height = '100vh';
+blurShield.style.backgroundColor = 'black';
+blurShield.style.color = 'red';
+blurShield.style.display = 'flex';
+blurShield.style.flexDirection = 'column';
+blurShield.style.alignItems = 'center';
+blurShield.style.justifyContent = 'center';
+blurShield.style.zIndex = '999999';
+blurShield.style.fontFamily = 'sans-serif';
+blurShield.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+    <h1 style="margin-top: 20px;">SECURITY LOCK</h1>
+    <p>Application lost focus. Click here to resume secure viewing.</p>
+`;
+blurShield.style.display = 'none';
+document.body.appendChild(blurShield);
+
+window.addEventListener('blur', () => { blurShield.style.display = 'flex'; });
+window.addEventListener('focus', () => { blurShield.style.display = 'none'; });
+
+// 1. SAFE BOOT SEQUENCE
 async function initApp() {
     if (!window.api) {
         document.body.innerHTML = `
-            <div style="display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column;">
+            <div style="display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column; background:#1e1e1e; color:white;">
                 <h1 style="color: #ff4d4d;">CRITICAL SYSTEM ERROR</h1>
-                <p>Security Bridge (preload.js) failed to connect.</p>
-                <p>Ensure preload.js is included in your package.json build files.</p>
+                <p>Security Bridge failed to connect.</p>
             </div>`;
         return;
     }
 
-    // Now it is safe to assign listeners
     window.api.onOpenFile((docId) => {
         currentActiveDocId = docId;
         checkAutoLogin();
@@ -28,7 +50,7 @@ async function initApp() {
     await checkAutoLogin();
 }
 
-// 2. SECURE OS-LEVEL AUTO LOGIN
+// 2. SECURE AUTO LOGIN
 async function checkAutoLogin() {
     const savedAuth = await window.api.getAuth();
 
@@ -37,7 +59,6 @@ async function checkAutoLogin() {
         document.getElementById('auth-screen').classList.remove('hidden');
         document.getElementById('auth-screen').innerHTML = `<h2>Verifying security credentials...</h2>`;
 
-        // Sending as a strict object
         const loginResult = await window.api.login({ email: savedAuth.email, password: savedAuth.password });
 
         if (loginResult.success) {
@@ -57,20 +78,16 @@ async function checkAutoLogin() {
     }
 }
 
-// 3. Manual Login
+// 3. MANUAL LOGIN
 document.getElementById('login-btn').addEventListener('click', async () => {
     const email = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value.trim();
     const errorDiv = document.getElementById('login-error');
 
-    if (!email || !password) {
-        errorDiv.innerText = "Provide email and password.";
-        return;
-    }
-
+    if (!email || !password) return errorDiv.innerText = "Provide email and password.";
     errorDiv.innerText = "Authenticating...";
 
-    const loginResult = await window.api.login({ email: email, password: password });
+    const loginResult = await window.api.login({ email, password });
 
     if (loginResult.success) {
         await window.api.saveAuth({ email, password, userId: loginResult.userId });
@@ -83,13 +100,13 @@ document.getElementById('login-btn').addEventListener('click', async () => {
     }
 });
 
-// 4. THE UNIVERSAL DOCUMENT ROUTER
+// 4. DOCUMENT ROUTER
 async function loadSecureDocument(userId, docId) {
     const authScreen = document.getElementById('auth-screen');
     authScreen.classList.remove('hidden');
     authScreen.innerHTML = `<h2>Decrypting file from Vault...</h2>`;
 
-    const response = await window.api.verifyAccess({ userId: userId, docId: docId });
+    const response = await window.api.verifyAccess({ userId, docId });
 
     if (response.success) {
         authScreen.classList.add('hidden');
@@ -99,8 +116,8 @@ async function loadSecureDocument(userId, docId) {
         container.classList.add('read-only-mode');
 
         const binaryString = atob(response.content);
-
         let ext = response.fileName.includes('.') ? response.fileName.split('.').pop().toLowerCase() : '';
+
         if (binaryString.startsWith("%PDF")) ext = 'pdf';
         else if (binaryString.startsWith("PK")) {
             if (binaryString.includes("word/document.xml")) ext = 'docx';
@@ -108,7 +125,6 @@ async function loadSecureDocument(userId, docId) {
         } else if (binaryString.trim().startsWith("<html") || binaryString.trim().startsWith("<!DOCTYPE html>")) {
             ext = 'html';
         }
-
         currentExtension = ext;
 
         if (ext === 'pdf') {
@@ -161,10 +177,7 @@ async function loadSecureDocument(userId, docId) {
 
 // 5. UNLOCK EDIT MODE
 document.getElementById('edit-btn').addEventListener('click', () => {
-    if (currentExtension === 'pdf') {
-        alert("🔒 PDFs are secure. Please edit the original .docx file instead.");
-        return;
-    }
+    if (currentExtension === 'pdf') return alert("🔒 PDFs are secure. Edit the original .docx file instead.");
 
     document.getElementById('edit-btn').style.display = 'none';
     document.getElementById('edit-tools').classList.remove('hidden');
@@ -173,46 +186,37 @@ document.getElementById('edit-btn').addEventListener('click', () => {
     const editor = document.getElementById('data-editor');
     if (editor) {
         if (editor.tagName === 'TEXTAREA') editor.removeAttribute('readonly');
-        else {
-            editor.setAttribute('contenteditable', 'true');
-            editor.style.outline = "2px dashed #ffc107";
-        }
+        else { editor.setAttribute('contenteditable', 'true'); editor.style.outline = "2px dashed #ffc107"; }
         editor.focus();
     }
 });
 
-// 6. SAVE BACK TO DB
+// 6. SAVE BACK
 document.getElementById('save-btn').addEventListener('click', async () => {
     const editor = document.getElementById('data-editor');
     if (editor) {
         document.getElementById('save-btn').innerText = "Saving to Server...";
-
         let newB64Content = "";
 
         if (currentExtension === 'xlsx' || currentExtension === 'csv' || currentExtension === 'xls') {
             const table = document.querySelector('#data-editor table');
-            const workbook = XLSX.utils.table_to_book(table);
-            newB64Content = XLSX.write(workbook, { type: 'base64', bookType: 'xlsx' });
+            newB64Content = XLSX.write(XLSX.utils.table_to_book(table), { type: 'base64', bookType: 'xlsx' });
         } else if (currentExtension === 'docx' || currentExtension === 'doc' || currentExtension === 'html') {
             newB64Content = btoa(editor.innerHTML);
         } else if (editor.tagName === 'TEXTAREA') {
             newB64Content = btoa(editor.value);
-        } else {
-            alert("Cannot save this format.");
-            document.getElementById('save-btn').innerText = "💾 Save Changes to Server";
-            return;
         }
 
         const savedAuth = await window.api.getAuth();
         const res = await window.api.saveDocumentEdits({ userId: savedAuth.userId, docId: currentActiveDocId, newB64Content });
 
         if (res.success) {
-            document.getElementById('save-btn').innerText = "✅ Saved to DB!";
+            document.getElementById('save-btn').innerText = "✅ Saved!";
             document.getElementById('save-btn').style.background = "#28a745";
-            setTimeout(() => { document.getElementById('save-btn').innerText = "💾 Save Changes to Server"; }, 3000);
+            setTimeout(() => { document.getElementById('save-btn').innerText = "💾 Save"; }, 3000);
         } else {
-            alert("❌ FAILED TO SAVE:\n\n" + res.error);
-            document.getElementById('save-btn').innerText = "⚠️ Retry Save";
+            alert("❌ FAILED TO SAVE:\n" + res.error);
+            document.getElementById('save-btn').innerText = "⚠️ Retry";
             document.getElementById('save-btn').style.background = "#dc3545";
         }
     }
@@ -221,24 +225,13 @@ document.getElementById('save-btn').addEventListener('click', async () => {
 function showSystemReady(email) {
     const authScreen = document.getElementById('auth-screen');
     authScreen.classList.remove('hidden');
-    authScreen.innerHTML = `
-        <h2 style="color: #007acc;">System Ready</h2>
-        <p>Logged in as: <b>${email}</b></p>
-        <button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 20px;">Log Out</button>
-    `;
+    authScreen.innerHTML = `<h2 style="color: #007acc;">System Ready</h2><p>Logged in as: <b>${email}</b></p><button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 20px;">Log Out</button>`;
     attachLogout();
 }
-
 function attachLogout() {
-    document.getElementById('logout-btn').addEventListener('click', async () => {
-        await window.api.clearAuth();
-        window.location.reload();
-    });
+    document.getElementById('logout-btn').addEventListener('click', async () => { await window.api.clearAuth(); window.location.reload(); });
 }
-
-// Start App
 document.addEventListener('DOMContentLoaded', initApp);
-
 
 
 // // renderer.js

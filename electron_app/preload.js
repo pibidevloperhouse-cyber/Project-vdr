@@ -1,20 +1,20 @@
 // preload.js
 const { contextBridge, ipcRenderer } = require('electron');
 
-console.log("PRELOAD: Security Bridge Initialized."); // You will see this in DevTools
+console.log("PRELOAD: Security Bridge Initialized.");
 
 contextBridge.exposeInMainWorld('api', {
     login: (credentials) => ipcRenderer.invoke('login', credentials),
     verifyAccess: (data) => ipcRenderer.invoke('verify-access', data),
     getStartupFile: () => ipcRenderer.invoke('get-startup-file'),
     onOpenFile: (callback) => ipcRenderer.on('open-vdr-file', (event, data) => callback(data)),
+
+    // Auth & Edit Actions
     saveAuth: (data) => ipcRenderer.invoke('save-auth', data),
     getAuth: () => ipcRenderer.invoke('get-auth'),
     clearAuth: () => ipcRenderer.invoke('clear-auth'),
     saveDocumentEdits: (data) => ipcRenderer.invoke('save-document-edits', data)
 });
-
-
 
 // // preload.js
 // const { contextBridge, ipcRenderer } = require('electron');

@@ -1,22 +1,21 @@
 // main.js
 require('dotenv').config();
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto'); // 🔥 Fernet removed, native crypto used
 const { createClient } = require('@supabase/supabase-js');
 const WebSocket = require('ws');
+const fernet = require('fernet'); // 🔥 Fernet is back as requested
 
+// Redirect logs to desktop for production debugging
 const logPath = path.join(app.getPath('userData'), 'vdr_debug.log');
-
-
-console.log = (msg) => {
+console.log = console.error = (msg) => {
     fs.appendFileSync(logPath, new Date().toISOString() + ': ' + msg + '\n');
 };
+// main.js - Lines 15 & 16
+const SUPABASE_URL = "https://xxlawcufvetxygaqwoxi.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4bGF3Y3VmdmV0eHlnYXF3b3hpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NDE3MzgsImV4cCI6MjA5NDMxNzczOH0.yw7i6-U8xuzdQy0vj9CsXnOjIj5iwO4F3BbsC1cuBaU";
 
-// 1. Initialize Supabase
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://your-project-id.supabase.co';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_KEY || 'your-anon-key';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
     global: { WebSocket: WebSocket }
@@ -40,6 +39,7 @@ ipcMain.handle('clear-auth', () => {
     return true;
 });
 
+// File Handling
 let fileToOpen = null;
 const candidatePath = process.argv.find(arg => arg.toLowerCase().endsWith('.vdr'));
 if (candidatePath) fileToOpen = candidatePath;
@@ -51,18 +51,24 @@ function parseVdrFile(filePath) {
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1280, height: 800,
-        kiosk: true,
-        alwaysOnTop: true,
+        kiosk: true, // Full screen trap
+        alwaysOnTop: true, // Prevents other apps from covering it
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            sandbox: false,
-            preload: path.join(__dirname, 'preload.js') // 🔥 BULLETPROOF PATH
+            preload: path.join(__dirname, 'preload.js')
         }
     });
 
+    // 🔥 OS-LEVEL SECURITY: Block screen recorders & Snipping Tool
+    mainWindow.setContentProtection(true);
+
     mainWindow.loadFile('index.html');
-    // mainWindow.webContents.openDevTools(); // UNCOMMENT TO DEBUG UI IN EXE
+
+    mainWindow.webContents.on('zoom-changed', (event, zoomDirection) => {
+        let currentZoom = mainWindow.webContents.getZoomLevel();
+        mainWindow.webContents.setZoomLevel(zoomDirection === 'in' ? currentZoom + 0.5 : currentZoom - 0.5);
+    });
 }
 
 app.on('second-instance', (event, commandLine) => {
@@ -74,20 +80,27 @@ app.on('second-instance', (event, commandLine) => {
     }
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+    createWindow();
+
+    // 🔥 TRUE KIOSK MODE: Block hardware keyboard shortcuts
+    globalShortcut.register('CommandOrControl+R', () => { console.log("Blocked Reload"); });
+    globalShortcut.register('CommandOrControl+Shift+I', () => { console.log("Blocked DevTools"); });
+    globalShortcut.register('F11', () => { console.log("Blocked Exit Fullscreen"); });
+    globalShortcut.register('Escape', () => { console.log("Blocked Escape"); });
+});
+
+app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+});
 
 ipcMain.handle('get-startup-file', () => fileToOpen ? parseVdrFile(fileToOpen) : null);
 
-// 🔥 BULLETPROOF LOGIN HANDLER
+// Login
 ipcMain.handle('login', async (event, args) => {
     try {
-        // Fix the flattening issue in production builds
         const payload = Array.isArray(args) ? args[0] : args;
-
-        if (!payload || !payload.email || !payload.password) {
-            console.log("MAIN DEBUG: Payload missing credentials", JSON.stringify(payload));
-            return { success: false, message: "System Error: Credentials lost in transit." };
-        }
+        if (!payload || !payload.email) return { success: false, message: "No credentials received." };
 
         const cleanEmail = payload.email.trim().toLowerCase();
 
@@ -97,7 +110,7 @@ ipcMain.handle('login', async (event, args) => {
             .eq('email', cleanEmail)
             .single();
 
-        if (error || !user) return { success: false, message: "User not found or DB error." };
+        if (error || !user) return { success: false, message: "User not found." };
         if (user.password_hash !== payload.password) return { success: false, message: "Invalid password" };
 
         return { success: true, user: user, userId: user.id };
@@ -106,20 +119,22 @@ ipcMain.handle('login', async (event, args) => {
     }
 });
 
-// 🔥 BULLETPROOF DECRYPTION HANDLER
+// 🔥 FERNET DECRYPTION & ACCESS VERIFICATION
 ipcMain.handle('verify-access', async (event, payload) => {
     try {
         const { userId, docId } = Array.isArray(payload) ? payload[0] : payload;
         if (!docId) throw new Error('No document ID provided.');
 
+        // 1. Fetch Metadata
         const { data: doc, error: docErr } = await supabase
             .from('documents')
             .select('file_path, dek_ref, name, uploaded_by')
             .eq('id', docId)
             .single();
 
-        if (docErr || !doc) throw new Error('File metadata not found in database.');
+        if (docErr || !doc) throw new Error('File metadata not found.');
 
+        // 2. Permission Check (Admin Bypass or Matrix Check)
         let canRead = false;
         let canEdit = false;
 
@@ -140,28 +155,31 @@ ipcMain.handle('verify-access', async (event, payload) => {
 
         if (!canRead) throw new Error('Access Denied: No Read Permission');
 
-        const { data: fileData, error: downloadErr } = await supabase.storage.from('vault-files').download(doc.file_path);
+        // 3. Download Encrypted Blob
+        const { data: fileData, error: downloadErr } = await supabase.storage
+            .from('vault-files') // Must match your Next.js bucket name!
+            .download(doc.file_path);
+
         if (downloadErr) throw new Error('Failed to download from vault.');
 
-        // 🔥 NATIVE AES-GCM DECRYPTION
-        const fileBuffer = Buffer.from(await fileData.arrayBuffer());
-        const [ivBase64, keyBase64] = doc.dek_ref.split(':');
+        // 4. Decode using Fernet
+        const encryptedText = await fileData.text();
+        const secret = new fernet.Secret(doc.dek_ref); // Your 32-byte Next.js key
+        const token = new fernet.Token({ token: encryptedText, secret: secret, ttl: 0 });
 
-        const iv = Buffer.from(ivBase64, 'base64');
-        const key = Buffer.from(keyBase64, 'base64');
-
-        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-        const decrypted = Buffer.concat([decipher.update(fileBuffer), decipher.final()]);
+        // This returns the Base64 string that Next.js uploaded
+        const decryptedBase64 = token.decode();
 
         await supabase.from('document_access_logs').insert([{ user_id: userId, document_id: docId }]);
 
-        return { success: true, canEdit, fileName: doc.name, content: decrypted.toString('base64') };
+        return { success: true, canEdit, fileName: doc.name, content: decryptedBase64 };
     } catch (error) {
+        console.error(error.message);
         return { success: false, error: error.message };
     }
 });
 
-// SAVE EDITS
+// Save Edits
 ipcMain.handle('save-document-edits', async (event, args) => {
     try {
         const { userId, docId, newB64Content } = Array.isArray(args) ? args[0] : args;
@@ -174,15 +192,200 @@ ipcMain.handle('save-document-edits', async (event, args) => {
             method: 'POST', body: formData, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
 
-        if (!response.ok) {
-            const errorDetails = await response.text();
-            throw new Error(`Server Error: ${errorDetails}`);
-        }
+        if (!response.ok) throw new Error(await response.text());
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
     }
 });
+
+
+
+// // main.js
+// require('dotenv').config();
+// const { app, BrowserWindow, ipcMain } = require('electron');
+// const path = require('path');
+// const fs = require('fs');
+// const crypto = require('crypto'); // 🔥 Fernet removed, native crypto used
+// const { createClient } = require('@supabase/supabase-js');
+// const WebSocket = require('ws');
+
+// const logPath = path.join(app.getPath('userData'), 'vdr_debug.log');
+
+
+// console.log = (msg) => {
+//     fs.appendFileSync(logPath, new Date().toISOString() + ': ' + msg + '\n');
+// };
+
+// // 1. Initialize Supabase
+// const SUPABASE_URL = process.env.SUPABASE_URL || 'https://your-project-id.supabase.co';
+// const SUPABASE_ANON_KEY = process.env.SUPABASE_KEY || 'your-anon-key';
+// const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+//     auth: { persistSession: false },
+//     global: { WebSocket: WebSocket }
+// });
+
+// let mainWindow;
+
+// // OS-Level Auth Storage
+// const authFilePath = path.join(app.getPath('userData'), 'vdr_auth.json');
+
+// ipcMain.handle('save-auth', (event, data) => {
+//     fs.writeFileSync(authFilePath, JSON.stringify(data));
+//     return true;
+// });
+// ipcMain.handle('get-auth', () => {
+//     try { if (fs.existsSync(authFilePath)) return JSON.parse(fs.readFileSync(authFilePath, 'utf8')); } catch (e) { }
+//     return null;
+// });
+// ipcMain.handle('clear-auth', () => {
+//     if (fs.existsSync(authFilePath)) fs.unlinkSync(authFilePath);
+//     return true;
+// });
+
+// let fileToOpen = null;
+// const candidatePath = process.argv.find(arg => arg.toLowerCase().endsWith('.vdr'));
+// if (candidatePath) fileToOpen = candidatePath;
+
+// function parseVdrFile(filePath) {
+//     try { return fs.readFileSync(filePath, 'utf8').trim(); } catch (e) { return null; }
+// }
+
+// function createWindow() {
+//     mainWindow = new BrowserWindow({
+//         width: 1280, height: 800,
+//         kiosk: true,
+//         alwaysOnTop: true,
+//         webPreferences: {
+//             nodeIntegration: false,
+//             contextIsolation: true,
+//             sandbox: false,
+//             preload: path.join(__dirname, 'preload.js') // 🔥 BULLETPROOF PATH
+//         }
+//     });
+
+//     mainWindow.loadFile('index.html');
+//     // mainWindow.webContents.openDevTools(); // UNCOMMENT TO DEBUG UI IN EXE
+// }
+
+// app.on('second-instance', (event, commandLine) => {
+//     if (mainWindow) {
+//         if (mainWindow.isMinimized()) mainWindow.restore();
+//         mainWindow.focus();
+//         const backgroundPath = commandLine.find(arg => arg.toLowerCase().endsWith('.vdr'));
+//         if (backgroundPath) mainWindow.webContents.send('open-vdr-file', parseVdrFile(backgroundPath));
+//     }
+// });
+
+// app.whenReady().then(createWindow);
+
+// ipcMain.handle('get-startup-file', () => fileToOpen ? parseVdrFile(fileToOpen) : null);
+
+// // 🔥 BULLETPROOF LOGIN HANDLER
+// ipcMain.handle('login', async (event, args) => {
+//     try {
+//         // Fix the flattening issue in production builds
+//         const payload = Array.isArray(args) ? args[0] : args;
+
+//         if (!payload || !payload.email || !payload.password) {
+//             console.log("MAIN DEBUG: Payload missing credentials", JSON.stringify(payload));
+//             return { success: false, message: "System Error: Credentials lost in transit." };
+//         }
+
+//         const cleanEmail = payload.email.trim().toLowerCase();
+
+//         const { data: user, error } = await supabase
+//             .from('users')
+//             .select('id, name, email, password_hash, role')
+//             .eq('email', cleanEmail)
+//             .single();
+
+//         if (error || !user) return { success: false, message: "User not found or DB error." };
+//         if (user.password_hash !== payload.password) return { success: false, message: "Invalid password" };
+
+//         return { success: true, user: user, userId: user.id };
+//     } catch (err) {
+//         return { success: false, message: err.message };
+//     }
+// });
+
+// // 🔥 BULLETPROOF DECRYPTION HANDLER
+// ipcMain.handle('verify-access', async (event, payload) => {
+//     try {
+//         const { userId, docId } = Array.isArray(payload) ? payload[0] : payload;
+//         if (!docId) throw new Error('No document ID provided.');
+
+//         const { data: doc, error: docErr } = await supabase
+//             .from('documents')
+//             .select('file_path, dek_ref, name, uploaded_by')
+//             .eq('id', docId)
+//             .single();
+
+//         if (docErr || !doc) throw new Error('File metadata not found in database.');
+
+//         let canRead = false;
+//         let canEdit = false;
+
+//         if (doc.uploaded_by === userId) {
+//             canRead = true; canEdit = true;
+//         } else {
+//             const { data: perm, error: permErr } = await supabase
+//                 .from('document_permissions')
+//                 .select('can_read, can_edit')
+//                 .eq('user_id', userId)
+//                 .eq('doc_id', docId)
+//                 .single();
+
+//             if (permErr || !perm) throw new Error('No permission record found.');
+//             canRead = perm.can_read;
+//             canEdit = perm.can_edit;
+//         }
+
+//         if (!canRead) throw new Error('Access Denied: No Read Permission');
+
+//         const { data: fileData, error: downloadErr } = await supabase.storage.from('vault-files').download(doc.file_path);
+//         if (downloadErr) throw new Error('Failed to download from vault.');
+
+//         // 🔥 NATIVE AES-GCM DECRYPTION
+//         const fileBuffer = Buffer.from(await fileData.arrayBuffer());
+//         const [ivBase64, keyBase64] = doc.dek_ref.split(':');
+
+//         const iv = Buffer.from(ivBase64, 'base64');
+//         const key = Buffer.from(keyBase64, 'base64');
+
+//         const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+//         const decrypted = Buffer.concat([decipher.update(fileBuffer), decipher.final()]);
+
+//         await supabase.from('document_access_logs').insert([{ user_id: userId, document_id: docId }]);
+
+//         return { success: true, canEdit, fileName: doc.name, content: decrypted.toString('base64') };
+//     } catch (error) {
+//         return { success: false, error: error.message };
+//     }
+// });
+
+// // SAVE EDITS
+// ipcMain.handle('save-document-edits', async (event, args) => {
+//     try {
+//         const { userId, docId, newB64Content } = Array.isArray(args) ? args[0] : args;
+//         const formData = new URLSearchParams();
+//         formData.append('doc_id', docId);
+//         formData.append('user_id', userId);
+//         formData.append('new_b64_content', newB64Content);
+
+//         const response = await fetch('http://127.0.0.1:8000/api/update', {
+//             method: 'POST', body: formData, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+//         });
+
+//         if (!response.ok) {
+//             const errorDetails = await response.text();
+//             throw new Error(`Server Error: ${errorDetails}`);
+//         }
+//         return { success: true };
+//     } catch (error) {
+//         return { success: false, error: error.message };
+//     }
+// });
 
 
 

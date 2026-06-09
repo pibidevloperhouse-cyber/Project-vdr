@@ -36,6 +36,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
     "dotenv": "^16.6.1",
+    "fernet": "^0.3.3",
     "node-fetch": "^3.3.2",
     "ws": "^8.21.0"
   },

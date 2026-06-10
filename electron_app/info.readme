@@ -1,0 +1,106 @@
+VDR Architecture & Flow Documentation
+1. System Overview
+This project is a high-security, desktop-based Virtual Data Room (VDR) viewer built using Electron, Node.js, and Supabase. It allows users to securely view and edit encrypted documents with zero-trust local storage, anti-screenshot protection, and strict audit logging.
+
+2. Core Architecture (File Roles)
+The application follows a strict 3-tier Electron architecture to ensure maximum security:
+
+main.js (The Secure Backend): Runs in Node.js. It acts as the "Vault Keeper." It communicates with Supabase (Database & Storage), handles Fernet decryption/encryption, spawns the OS-level locked window, watches temporary files, and executes OS-level process kills (terminating MS Word/Excel).
+
+preload.js (The Security Bridge): The IPC (Inter-Process Communication) bridge. It ensures the frontend UI can ask the backend to do things (like saving a file or checking out a document) without exposing sensitive Node.js APIs or Database Keys to the browser environment.
+
+renderer.js (The UI Controller): The frontend JavaScript. It handles DOM manipulation, triggers the "Blur Shield" on Alt-Tab, manages button states (Edit, Save, Close), and handles the secure embedding of Microsoft's Online Viewer.
+
+index.html (The View): The visual layout. It contains the locked Kiosk UI, login screens, and the secure iframe container for document rendering.
+
+3. Encryption Standard
+Protocol: Fernet (Symmetric Encryption based on AES 128-bit in CBC mode with SHA256 HMAC for authentication).
+
+How it works: The entire file is converted to a Base64 string and encrypted as one massive, scrambled block.
+
+Key Storage: The specific Fernet Key for each file is stored in the Supabase Database under the dek_ref column.
+
+Limitation/Security Benefit: Because it is whole-file encryption, you cannot inject edits directly. Every save creates a completely new, unique encrypted file.
+
+4. Feature & Database Flows (Step-by-Step)
+A. View Flow (Opening a File)
+Trigger: User selects a .vdr keycard file via the OS file browser.
+
+Fetch: Electron reads the docId inside the .vdr file and queries the Supabase documents and document_permissions tables.
+
+Verify: Checks if the user_id has can_read permissions.
+
+Decrypt: Downloads the raw encrypted Blob from the vault-files bucket, decrypts it in memory using the dek_ref key via Fernet.
+
+Render: * PDFs & TXT are rendered directly natively in the Electron window.
+
+Office Files are rendered flawlessly by generating a 1-hour Temporary Signed URL from Supabase and passing it into a secure iframe running the Microsoft Office Online Viewer.
+
+DB Update: Inserts a new row into document_access_logs recording the user_id, docId, and accessed_at timestamp.
+
+B. Edit Flow: Pure Text (.txt)
+Trigger: User clicks "Edit Text".
+
+Action: The secure textarea unlocks for live typing.
+
+Save: User clicks "Save". renderer.js safely extracts the Base64 text and passes it to main.js.
+
+DB Update: * Encrypts the new text, uploads it as a brand new file (e.g., secret_v170000.txt).
+
+Updates the documents table to point the file_path to this new version.
+
+Deletes the old version from the bucket.
+
+Logs the action in document_edit_logs.
+
+C. Edit Flow: MS Office Checkout (.docx, .xlsx)
+Trigger: User clicks "Edit in MS Office".
+
+Checkout: main.js decrypts the file and saves it to a hidden OS temp folder, then forces Microsoft Word or Excel to open it natively.
+
+Watch: Electron waits 3.5 seconds, then begins polling the file's Modified Time (mtimeMs) every 1 second.
+
+Save & Auto-Kill: When the user hits Ctrl+S in MS Word:
+
+Electron detects the new timestamp, grabs the fresh data, encrypts it, and uploads a new version to the vault.
+
+DB Update: Updates file_path in documents and logs the event in document_edit_logs.
+
+The Assassin: Electron executes taskkill /F /IM WINWORD.EXE to instantly force-close Microsoft Office.
+
+Cleanup: Electron physically deletes the raw file from the hidden temp folder so no trace is left on the hard drive.
+
+Reload: The UI refreshes to show the newly updated file.
+
+D. Audit Logging (Closing a File)
+Trigger: User clicks "Close File" or logs out.
+
+Action: The frontend fires a "death signal" to main.js with the active logId.
+
+DB Update: Updates the existing row in document_access_logs. It calculates the difference between now() and accessed_at, and populates closed_at, duration_sec (as an Integer), and duration_formatted (as a String like "5 min 30 sec").
+
+5. Security Protocols
+Anti-Screenshot: Uses Electron's native setContentProtection(true). Snipping Tool, OBS, and Zoom will capture a black rectangle.
+
+Hardware Lock: Escape, F11, DevTools (Ctrl+Shift+I), and Refresh (Ctrl+R) are intercepted and ignored.
+
+Blur Shield: If the user Alt-Tabs or clicks a secondary monitor, a massive red "SECURITY LOCK" screen covers the document instantly to prevent shoulder-surfing.
+
+6. Supported Formats
+Currently Supported & Tested: * PDF (Native view, highly secure)
+
+TXT / HTML (Native view, Native live-edit)
+
+DOCX, DOC, XLSX, XLS, CSV (Flawless view via MS Viewer, Native checkout editing)
+
+Future Formats Supported (No code changes needed):
+
+PPTX / PPT (PowerPoint natively supports the Checkout flow and MS Viewer).
+
+Image Formats (PNG, JPG): Easily supported by routing Base64 data to an <img src=""> tag in renderer.js.
+
+Future Formats (Requires new viewers):
+
+MP4 / Video (Requires a secure streaming buffer chunker so the video isn't fully downloaded to memory at once).
+
+CAD / DWG files (Would require Autodesk cloud viewers or similar WebGL integrations).

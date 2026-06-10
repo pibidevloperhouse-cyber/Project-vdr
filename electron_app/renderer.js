@@ -3,70 +3,46 @@ window.addEventListener('contextmenu', (e) => e.preventDefault());
 
 let currentActiveDocId = null;
 let currentExtension = "";
+let currentLogId = null;
 
-// 🔥 OS-LEVEL SECURITY: The Blur Shield
 const blurShield = document.createElement('div');
-blurShield.style.position = 'fixed';
-blurShield.style.top = '0'; blurShield.style.left = '0';
+blurShield.style.position = 'fixed'; blurShield.style.top = '0'; blurShield.style.left = '0';
 blurShield.style.width = '100vw'; blurShield.style.height = '100vh';
-blurShield.style.backgroundColor = 'black';
-blurShield.style.color = 'red';
-blurShield.style.display = 'flex';
-blurShield.style.flexDirection = 'column';
-blurShield.style.alignItems = 'center';
-blurShield.style.justifyContent = 'center';
-blurShield.style.zIndex = '999999';
-blurShield.style.fontFamily = 'sans-serif';
+blurShield.style.backgroundColor = 'black'; blurShield.style.color = 'red';
+blurShield.style.display = 'none'; blurShield.style.flexDirection = 'column';
+blurShield.style.alignItems = 'center'; blurShield.style.justifyContent = 'center';
+blurShield.style.zIndex = '999999'; blurShield.style.fontFamily = 'sans-serif';
 blurShield.innerHTML = `
     <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
     <h1 style="margin-top: 20px;">SECURITY LOCK</h1>
     <p>Application lost focus. Click here to resume secure viewing.</p>
 `;
-blurShield.style.display = 'none';
 document.body.appendChild(blurShield);
-
 window.addEventListener('blur', () => { blurShield.style.display = 'flex'; });
 window.addEventListener('focus', () => { blurShield.style.display = 'none'; });
 
-// 1. SAFE BOOT SEQUENCE
+window.addEventListener('beforeunload', () => {
+    if (currentLogId) window.api.closeLog(currentLogId);
+});
+
 async function initApp() {
-    if (!window.api) {
-        document.body.innerHTML = `
-            <div style="display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column; background:#1e1e1e; color:white;">
-                <h1 style="color: #ff4d4d;">CRITICAL SYSTEM ERROR</h1>
-                <p>Security Bridge failed to connect.</p>
-            </div>`;
-        return;
-    }
-
-    window.api.onOpenFile((docId) => {
-        currentActiveDocId = docId;
-        checkAutoLogin();
-    });
-
+    if (!window.api) return document.body.innerHTML = `<h1 style="color:red; text-align:center; margin-top:20vh;">Bridge Failed</h1>`;
+    window.api.onOpenFile((docId) => { currentActiveDocId = docId; checkAutoLogin(); });
     const startupDocId = await window.api.getStartupFile();
     if (startupDocId) currentActiveDocId = startupDocId;
-
     await checkAutoLogin();
 }
 
-// 2. SECURE AUTO LOGIN
 async function checkAutoLogin() {
     const savedAuth = await window.api.getAuth();
-
     if (savedAuth && savedAuth.email && savedAuth.password) {
         document.getElementById('login-screen').classList.add('hidden');
         document.getElementById('auth-screen').classList.remove('hidden');
         document.getElementById('auth-screen').innerHTML = `<h2>Verifying security credentials...</h2>`;
-
-        const loginResult = await window.api.login({ email: savedAuth.email, password: savedAuth.password });
-
-        if (loginResult.success) {
-            if (currentActiveDocId) {
-                await loadSecureDocument(loginResult.userId, currentActiveDocId);
-            } else {
-                showSystemReady(savedAuth.email);
-            }
+        const res = await window.api.login({ email: savedAuth.email, password: savedAuth.password });
+        if (res.success) {
+            if (currentActiveDocId) await loadSecureDocument(res.userId, currentActiveDocId);
+            else showSystemReady(savedAuth.email);
         } else {
             await window.api.clearAuth();
             document.getElementById('auth-screen').classList.add('hidden');
@@ -78,29 +54,20 @@ async function checkAutoLogin() {
     }
 }
 
-// 3. MANUAL LOGIN
 document.getElementById('login-btn').addEventListener('click', async () => {
     const email = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value.trim();
-    const errorDiv = document.getElementById('login-error');
-
-    if (!email || !password) return errorDiv.innerText = "Provide email and password.";
-    errorDiv.innerText = "Authenticating...";
-
-    const loginResult = await window.api.login({ email, password });
-
-    if (loginResult.success) {
-        await window.api.saveAuth({ email, password, userId: loginResult.userId });
+    if (!email || !password) return;
+    document.getElementById('login-error').innerText = "Authenticating...";
+    const res = await window.api.login({ email, password });
+    if (res.success) {
+        await window.api.saveAuth({ email, password, userId: res.userId });
         document.getElementById('login-screen').classList.add('hidden');
-
-        if (currentActiveDocId) await loadSecureDocument(loginResult.userId, currentActiveDocId);
+        if (currentActiveDocId) await loadSecureDocument(res.userId, currentActiveDocId);
         else showSystemReady(email);
-    } else {
-        errorDiv.innerText = loginResult.message || loginResult.error || "Login Failed";
-    }
+    } else { document.getElementById('login-error').innerText = res.message; }
 });
 
-// 4. DOCUMENT ROUTER
 async function loadSecureDocument(userId, docId) {
     const authScreen = document.getElementById('auth-screen');
     authScreen.classList.remove('hidden');
@@ -109,9 +76,11 @@ async function loadSecureDocument(userId, docId) {
     const response = await window.api.verifyAccess({ userId, docId });
 
     if (response.success) {
+        currentLogId = response.logId;
+        currentActiveDocId = docId; // Ensure we track what is currently open
+
         authScreen.classList.add('hidden');
         document.getElementById('main-app').classList.remove('hidden');
-
         const container = document.getElementById('viewer-container');
         container.classList.add('read-only-mode');
 
@@ -122,9 +91,8 @@ async function loadSecureDocument(userId, docId) {
         else if (binaryString.startsWith("PK")) {
             if (binaryString.includes("word/document.xml")) ext = 'docx';
             else if (binaryString.includes("xl/worksheets")) ext = 'xlsx';
-        } else if (binaryString.trim().startsWith("<html") || binaryString.trim().startsWith("<!DOCTYPE html>")) {
-            ext = 'html';
-        }
+        } else if (binaryString.trim().startsWith("<html") || binaryString.trim().startsWith("<!DOCTYPE html>")) ext = 'html';
+
         currentExtension = ext;
 
         if (ext === 'pdf') {
@@ -132,50 +100,59 @@ async function loadSecureDocument(userId, docId) {
             container.innerHTML = `<iframe src="${pdfDataUri}" width="100%" height="100%" style="border: none;" allowfullscreen></iframe>`;
         }
         else if (ext === 'docx' || ext === 'doc') {
-            if (binaryString.startsWith("<")) {
-                container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 50px; width: 800px; min-height: 100vh; margin: 0 auto;">${binaryString}</div>`;
-            } else {
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-                try {
-                    const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-                    container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 50px; width: 800px; min-height: 100vh; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.5);">${res.value}</div>`;
-                } catch (e) {
-                    container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Word Document.</div>`;
-                }
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+            try {
+                const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+                container.innerHTML = `
+                <div style="width: 100%; display: flex; justify-content: center; background-color: #1e1e1e; padding: 20px;">
+                    <div id="data-editor" style="background: white !important; color: black !important; padding: 60px; width: 210mm; min-height: 297mm; box-shadow: 0 4px 10px rgba(0,0,0,0.8); font-family: Arial, sans-serif; line-height: 1.6; text-align: left;">
+                        ${res.value}
+                    </div>
+                </div>`;
+            } catch (e) {
+                container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Word Document.</div>`;
             }
         }
         else if (ext === 'xlsx' || ext === 'csv' || ext === 'xls') {
             try {
                 const workbook = XLSX.read(response.content, { type: 'base64' });
                 const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[workbook.SheetNames[0]]);
-                container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 20px; width: 95%; height: 95%; overflow: auto; margin: 0 auto;">${htmlStr}</div>`;
+                container.innerHTML = `
+                <div style="background: #f3f2f1; padding: 20px; width: 100%; height: 100%; overflow: auto;">
+                    <style>
+                        #data-editor table { width: 100%; border-collapse: collapse; background: white; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
+                        #data-editor th, #data-editor td { border: 1px solid #d2d2d2; padding: 8px; text-align: left; }
+                        #data-editor th { background-color: #e1dfdd; font-weight: bold; }
+                        #data-editor tr:hover { background-color: #f9f9f9; }
+                    </style>
+                    <div id="data-editor" style="box-shadow: 0 2px 6px rgba(0,0,0,0.1);">${htmlStr}</div>
+                </div>`;
             } catch (e) {
                 container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Excel Document.</div>`;
             }
         }
-        else if (ext === 'html' || ext === 'htm') {
-            container.innerHTML = `<div id="data-editor" style="background: white; color: black; width: 100%; height: 100%; overflow: auto;">${binaryString}</div>`;
-        }
         else {
-            container.innerHTML = `<textarea id="data-editor" style="width: 95%; height: 95%; margin: 20px; background: #2d2d2d; color: white; border: none; padding: 20px; resize:none;" readonly>${binaryString}</textarea>`;
+            container.innerHTML = `<textarea id="data-editor" style="width: 90%; max-width: 800px; height: 90vh; margin: 20px auto; display: block; background: #2d2d2d; color: #e0e0e0; border: 1px solid #444; border-radius: 8px; padding: 30px; font-family: 'Courier New', monospace; font-size: 14px; resize:none; outline: none;" readonly>${binaryString}</textarea>`;
         }
 
         document.getElementById('edit-btn').style.display = response.canEdit ? 'block' : 'none';
 
+        if (ext === 'docx' || ext === 'doc') {
+            document.getElementById('save-btn').innerText = "💾 Save & Lock as PDF";
+            document.getElementById('save-btn').style.background = "#dc3545";
+        } else {
+            document.getElementById('save-btn').innerText = "💾 Save Changes";
+            document.getElementById('save-btn').style.background = "#28a745";
+        }
+
     } else {
         const savedAuth = await window.api.getAuth();
-        authScreen.innerHTML = `
-            <h2 style="color: #dc3545;">Access Denied</h2>
-            <p>${response.error || "Unknown Error"}</p>
-            <p>Logged in as: <b>${savedAuth ? savedAuth.email : 'Unknown'}</b></p>
-            <button id="logout-btn" class="btn" style="background: #dc3545; margin-top:20px;">Switch User</button>
-        `;
+        authScreen.innerHTML = `<h2 style="color: #dc3545;">Access Denied</h2><p>${response.error}</p><button id="logout-btn" class="btn" style="background: #dc3545; margin-top:20px;">Switch User</button>`;
         attachLogout();
     }
 }
 
-// 5. UNLOCK EDIT MODE
 document.getElementById('edit-btn').addEventListener('click', () => {
     if (currentExtension === 'pdf') return alert("🔒 PDFs are secure. Edit the original .docx file instead.");
 
@@ -191,321 +168,409 @@ document.getElementById('edit-btn').addEventListener('click', () => {
     }
 });
 
-// 6. SAVE BACK
 document.getElementById('save-btn').addEventListener('click', async () => {
     const editor = document.getElementById('data-editor');
-    if (editor) {
-        document.getElementById('save-btn').innerText = "Saving to Server...";
-        let newB64Content = "";
+    if (!editor) return;
 
-        if (currentExtension === 'xlsx' || currentExtension === 'csv' || currentExtension === 'xls') {
-            const table = document.querySelector('#data-editor table');
-            newB64Content = XLSX.write(XLSX.utils.table_to_book(table), { type: 'base64', bookType: 'xlsx' });
-        } else if (currentExtension === 'docx' || currentExtension === 'doc' || currentExtension === 'html') {
-            newB64Content = btoa(editor.innerHTML);
-        } else if (editor.tagName === 'TEXTAREA') {
-            newB64Content = btoa(editor.value);
+    const saveBtn = document.getElementById('save-btn');
+    saveBtn.innerText = "Encrypting & Saving...";
+    let newB64Content = "";
+    let isConvertingToPdf = false;
+
+    try {
+        if (currentExtension === 'docx' || currentExtension === 'doc') {
+            isConvertingToPdf = true;
+            saveBtn.innerText = "Generating PDF...";
+
+            const opt = { margin: 10, filename: 'converted.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+            const pdfArrayBuffer = await html2pdf().set(opt).from(editor).output('arraybuffer');
+
+            const bytes = new Uint8Array(pdfArrayBuffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+            newB64Content = btoa(binary);
+        } else {
+            if (currentExtension === 'xlsx' || currentExtension === 'csv' || currentExtension === 'xls') {
+                const table = document.querySelector('#data-editor table');
+                newB64Content = XLSX.write(XLSX.utils.table_to_book(table), { type: 'base64', bookType: 'xlsx' });
+            } else if (editor.tagName === 'TEXTAREA') {
+                newB64Content = btoa(unescape(encodeURIComponent(editor.value)));
+            } else {
+                newB64Content = btoa(unescape(encodeURIComponent(editor.innerHTML)));
+            }
         }
 
         const savedAuth = await window.api.getAuth();
-        const res = await window.api.saveDocumentEdits({ userId: savedAuth.userId, docId: currentActiveDocId, newB64Content });
+        const res = await window.api.saveDocumentEdits({
+            userId: savedAuth.userId, docId: currentActiveDocId, newB64Content: newB64Content, isPdfConversion: isConvertingToPdf
+        });
 
         if (res.success) {
-            document.getElementById('save-btn').innerText = "✅ Saved!";
-            document.getElementById('save-btn').style.background = "#28a745";
-            setTimeout(() => { document.getElementById('save-btn').innerText = "💾 Save"; }, 3000);
+            saveBtn.innerText = isConvertingToPdf ? "✅ Locked as PDF!" : "✅ Verified & Locked in Vault!";
+            saveBtn.style.background = "#28a745";
+            if (currentLogId) window.api.closeLog(currentLogId);
+            setTimeout(() => { window.location.reload(); }, 2500);
         } else {
-            alert("❌ FAILED TO SAVE:\n" + res.error);
-            document.getElementById('save-btn').innerText = "⚠️ Retry";
-            document.getElementById('save-btn').style.background = "#dc3545";
+            throw new Error(res.error);
         }
+    } catch (error) {
+        alert("❌ FAILED TO SAVE:\n" + error.message);
+        saveBtn.innerText = "⚠️ Retry";
+        saveBtn.style.background = "#dc3545";
     }
 });
 
+// 🔥 NEW: showSystemReady now contains the Open File button
 function showSystemReady(email) {
     const authScreen = document.getElementById('auth-screen');
     authScreen.classList.remove('hidden');
-    authScreen.innerHTML = `<h2 style="color: #007acc;">System Ready</h2><p>Logged in as: <b>${email}</b></p><button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 20px;">Log Out</button>`;
+    authScreen.innerHTML = `
+        <h2 style="color: #007acc;">System Ready</h2>
+        <p>Logged in as: <b>${email}</b></p>
+        <button id="open-file-btn" class="btn" style="background: #28a745; margin-top: 20px; width: 200px; font-weight: bold;">📂 Open .vdr File</button>
+        <br>
+        <button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 15px; width: 200px;">Log Out</button>
+    `;
+
     attachLogout();
+
+    // Attach File Picker logic
+    document.getElementById('open-file-btn').addEventListener('click', async () => {
+        const res = await window.api.openFileDialog();
+        if (res.success && res.docId) {
+            const savedAuth = await window.api.getAuth();
+            await loadSecureDocument(savedAuth.userId, res.docId);
+        } else if (res.error) {
+            alert("Error opening file: " + res.error);
+        }
+    });
 }
+
 function attachLogout() {
-    document.getElementById('logout-btn').addEventListener('click', async () => { await window.api.clearAuth(); window.location.reload(); });
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+        if (currentLogId) window.api.closeLog(currentLogId);
+        await window.api.clearAuth();
+        window.location.reload();
+    });
 }
 document.addEventListener('DOMContentLoaded', initApp);
+
+
+
+
+
+
+
 
 
 // // renderer.js
 // window.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // let currentActiveDocId = null;
-// let currentExtension = '';
+// let currentExtension = "";
+// let currentLogId = null; // 🔥 TRACKS THE LOG SESSION
 
-// // ── 1. Listen for double-clicked .vdr file (from second instance) ─────────────
-// window.api.onOpenFile((docId) => {
-//     currentActiveDocId = docId;
-//     checkAutoLogin();
+// const blurShield = document.createElement('div');
+// blurShield.style.position = 'fixed'; blurShield.style.top = '0'; blurShield.style.left = '0';
+// blurShield.style.width = '100vw'; blurShield.style.height = '100vh';
+// blurShield.style.backgroundColor = 'black'; blurShield.style.color = 'red';
+// blurShield.style.display = 'none'; blurShield.style.flexDirection = 'column';
+// blurShield.style.alignItems = 'center'; blurShield.style.justifyContent = 'center';
+// blurShield.style.zIndex = '999999'; blurShield.style.fontFamily = 'sans-serif';
+// blurShield.innerHTML = `
+//     <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+//     <h1 style="margin-top: 20px;">SECURITY LOCK</h1>
+//     <p>Application lost focus. Click here to resume secure viewing.</p>
+// `;
+// document.body.appendChild(blurShield);
+// window.addEventListener('blur', () => { blurShield.style.display = 'flex'; });
+// window.addEventListener('focus', () => { blurShield.style.display = 'none'; });
+
+// // 🔥 TRIGGER DEATH SIGNAL ON CLOSE
+// window.addEventListener('beforeunload', () => {
+//     if (currentLogId) window.api.closeLog(currentLogId);
 // });
 
-// // ── 2. On startup ─────────────────────────────────────────────────────────────
-// window.api.getStartupFile().then(docId => {
-//     if (docId) currentActiveDocId = docId;
-//     checkAutoLogin();
-// });
+// async function initApp() {
+//     if (!window.api) return document.body.innerHTML = `<h1 style="color:red; text-align:center; margin-top:20vh;">Bridge Failed</h1>`;
+//     window.api.onOpenFile((docId) => { currentActiveDocId = docId; checkAutoLogin(); });
+//     const startupDocId = await window.api.getStartupFile();
+//     if (startupDocId) currentActiveDocId = startupDocId;
+//     await checkAutoLogin();
+// }
 
-// // ── 3. Auto-login with saved credentials ──────────────────────────────────────
 // async function checkAutoLogin() {
 //     const savedAuth = await window.api.getAuth();
-
-//     if (savedAuth?.email && savedAuth?.password) {
-//         showScreen('auth-screen');
-//         document.getElementById('auth-screen').innerHTML = `<h2>Verifying credentials…</h2>`;
-
-//         const result = await window.api.login({ email: savedAuth.email, password: savedAuth.password });
-
-//         if (result.success) {
-//             // ✅ FIX: result.user.id — not result.userId
-//             const userId = result.user.id;
-//             if (currentActiveDocId) {
-//                 await loadSecureDocument(userId, currentActiveDocId);
-//             } else {
-//                 showSystemReady(savedAuth.email, userId);
-//             }
+//     if (savedAuth && savedAuth.email && savedAuth.password) {
+//         document.getElementById('login-screen').classList.add('hidden');
+//         document.getElementById('auth-screen').classList.remove('hidden');
+//         document.getElementById('auth-screen').innerHTML = `<h2>Verifying security credentials...</h2>`;
+//         const res = await window.api.login({ email: savedAuth.email, password: savedAuth.password });
+//         if (res.success) {
+//             if (currentActiveDocId) await loadSecureDocument(res.userId, currentActiveDocId);
+//             else showSystemReady(savedAuth.email);
 //         } else {
 //             await window.api.clearAuth();
-//             showScreen('login-screen');
+//             document.getElementById('auth-screen').classList.add('hidden');
+//             document.getElementById('login-screen').classList.remove('hidden');
 //         }
 //     } else {
-//         // No saved auth — show login
-//         showScreen('login-screen');
+//         document.getElementById('auth-screen').classList.add('hidden');
+//         document.getElementById('login-screen').classList.remove('hidden');
 //     }
 // }
 
-// // ── 4. Manual login ───────────────────────────────────────────────────────────
 // document.getElementById('login-btn').addEventListener('click', async () => {
 //     const email = document.getElementById('email').value.trim();
 //     const password = document.getElementById('password').value.trim();
-//     const errorDiv = document.getElementById('login-error');
-
-//     if (!email || !password) { errorDiv.innerText = 'Provide email and password.'; return; }
-//     errorDiv.innerText = 'Authenticating…';
-
-//     const result = await window.api.login({ email, password });
-
-//     if (result.success) {
-//         // ✅ FIX: result.user.id
-//         const userId = result.user.id;
-//         await window.api.saveAuth({ email, password, userId });
-//         if (currentActiveDocId) {
-//             await loadSecureDocument(userId, currentActiveDocId);
-//         } else {
-//             showSystemReady(email, userId);
-//         }
-//     } else {
-//         errorDiv.innerText = result.message || 'Login failed.';
-//     }
+//     if (!email || !password) return;
+//     document.getElementById('login-error').innerText = "Authenticating...";
+//     const res = await window.api.login({ email, password });
+//     if (res.success) {
+//         await window.api.saveAuth({ email, password, userId: res.userId });
+//         document.getElementById('login-screen').classList.add('hidden');
+//         if (currentActiveDocId) await loadSecureDocument(res.userId, currentActiveDocId);
+//         else showSystemReady(email);
+//     } else { document.getElementById('login-error').innerText = res.message; }
 // });
 
-// // ── 5. Load and decrypt document ──────────────────────────────────────────────
 // async function loadSecureDocument(userId, docId) {
-//     showScreen('auth-screen');
-//     document.getElementById('auth-screen').innerHTML = `<h2>Decrypting file from Vault…</h2>`;
+//     const authScreen = document.getElementById('auth-screen');
+//     authScreen.classList.remove('hidden');
+//     authScreen.innerHTML = `<h2>Decrypting file from Vault...</h2>`;
 
 //     const response = await window.api.verifyAccess({ userId, docId });
 
 //     if (response.success) {
-//         showScreen('main-app');
-
+//         currentLogId = response.logId; // 🔥 SAVE LOG ID
+//         authScreen.classList.add('hidden');
+//         document.getElementById('main-app').classList.remove('hidden');
 //         const container = document.getElementById('viewer-container');
 //         container.classList.add('read-only-mode');
 
 //         const binaryString = atob(response.content);
+//         let ext = response.fileName.includes('.') ? response.fileName.split('.').pop().toLowerCase() : '';
 
-//         // File type sniffer
-//         let ext = response.fileName?.includes('.') ? response.fileName.split('.').pop().toLowerCase() : '';
-//         if (binaryString.startsWith('%PDF')) ext = 'pdf';
-//         else if (binaryString.startsWith('PK')) {
-//             if (binaryString.includes('word/document.xml')) ext = 'docx';
-//             else if (binaryString.includes('xl/worksheets')) ext = 'xlsx';
-//         } else if (binaryString.trim().startsWith('<html') ||
-//             binaryString.trim().startsWith('<!DOCTYPE html>')) ext = 'html';
+//         if (binaryString.startsWith("%PDF")) ext = 'pdf';
+//         else if (binaryString.startsWith("PK")) {
+//             if (binaryString.includes("word/document.xml")) ext = 'docx';
+//             else if (binaryString.includes("xl/worksheets")) ext = 'xlsx';
+//         } else if (binaryString.trim().startsWith("<html") || binaryString.trim().startsWith("<!DOCTYPE html>")) ext = 'html';
 
 //         currentExtension = ext;
 
+//         // 🟢 PDF
 //         if (ext === 'pdf') {
 //             const pdfDataUri = `data:application/pdf;base64,${response.content}#toolbar=0&navpanes=0`;
-//             container.innerHTML = `<iframe src="${pdfDataUri}" width="100%" height="100%" style="border:none;" allowfullscreen></iframe>`;
+//             container.innerHTML = `<iframe src="${pdfDataUri}" width="100%" height="100%" style="border: none;" allowfullscreen></iframe>`;
 //         }
+//         // 🟢 WORD
 //         else if (ext === 'docx' || ext === 'doc') {
-//             if (binaryString.startsWith('<')) {
-//                 container.innerHTML = `<div id="data-editor" style="background:white;color:black;padding:50px;width:800px;min-height:100vh;margin:0 auto;">${binaryString}</div>`;
-//             } else {
-//                 const bytes = new Uint8Array(binaryString.length);
-//                 for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-//                 try {
-//                     const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-//                     container.innerHTML = `<div id="data-editor" style="background:white;color:black;padding:50px;width:800px;min-height:100vh;margin:0 auto;box-shadow:0 0 10px rgba(0,0,0,0.5);">${res.value}</div>`;
-//                 } catch (e) {
-//                     container.innerHTML = `<div style="color:red;padding:20px;">Failed to render Word document: ${e.message}</div>`;
-//                 }
+//             const bytes = new Uint8Array(binaryString.length);
+//             for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+//             try {
+//                 const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+//                 container.innerHTML = `
+//                 <div style="width: 100%; display: flex; justify-content: center; background-color: #1e1e1e; padding: 20px;">
+//                     <div id="data-editor" style="background: white !important; color: black !important; padding: 60px; width: 210mm; min-height: 297mm; box-shadow: 0 4px 10px rgba(0,0,0,0.8); font-family: Arial, sans-serif; line-height: 1.6; text-align: left;">
+//                         ${res.value}
+//                     </div>
+//                 </div>`;
+//             } catch (e) {
+//                 container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Word Document.</div>`;
 //             }
 //         }
+//         // 🟢 EXCEL
 //         else if (ext === 'xlsx' || ext === 'csv' || ext === 'xls') {
 //             try {
 //                 const workbook = XLSX.read(response.content, { type: 'base64' });
 //                 const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[workbook.SheetNames[0]]);
-//                 container.innerHTML = `<div id="data-editor" style="background:white;color:black;padding:20px;width:95%;height:95%;overflow:auto;margin:0 auto;">${htmlStr}</div>`;
+//                 container.innerHTML = `
+//                 <div style="background: #f3f2f1; padding: 20px; width: 100%; height: 100%; overflow: auto;">
+//                     <style>
+//                         #data-editor table { width: 100%; border-collapse: collapse; background: white; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
+//                         #data-editor th, #data-editor td { border: 1px solid #d2d2d2; padding: 8px; text-align: left; }
+//                         #data-editor th { background-color: #e1dfdd; font-weight: bold; }
+//                         #data-editor tr:hover { background-color: #f9f9f9; }
+//                     </style>
+//                     <div id="data-editor" style="box-shadow: 0 2px 6px rgba(0,0,0,0.1);">${htmlStr}</div>
+//                 </div>`;
 //             } catch (e) {
-//                 container.innerHTML = `<div style="color:red;padding:20px;">Failed to render spreadsheet: ${e.message}</div>`;
+//                 container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Excel Document.</div>`;
 //             }
 //         }
-//         else if (ext === 'html' || ext === 'htm') {
-//             container.innerHTML = `<div id="data-editor" style="background:white;color:black;width:100%;height:100%;overflow:auto;">${binaryString}</div>`;
-//         }
+//         // 🟢 TEXT / HTML
+//         // 🟢 EXCEL & TEXT (Normal Save)
 //         else {
-//             container.innerHTML = `<textarea id="data-editor" style="width:95%;height:95%;margin:20px;background:#2d2d2d;color:white;border:none;padding:20px;resize:none;" readonly>${binaryString}</textarea>`;
+//             if (currentExtension === 'xlsx' || currentExtension === 'csv' || currentExtension === 'xls') {
+//                 const table = document.querySelector('#data-editor table');
+//                 newB64Content = XLSX.write(XLSX.utils.table_to_book(table), { type: 'base64', bookType: 'xlsx' });
+//             } else if (editor.tagName === 'TEXTAREA') {
+//                 // 🔥 THE FIX: Unicode-safe Base64 encoding
+//                 newB64Content = btoa(unescape(encodeURIComponent(editor.value)));
+//             } else {
+//                 // 🔥 THE FIX: Unicode-safe Base64 encoding
+//                 newB64Content = btoa(unescape(encodeURIComponent(editor.innerHTML)));
+//             }
 //         }
 
-//         // Edit button visibility
 //         document.getElementById('edit-btn').style.display = response.canEdit ? 'block' : 'none';
+
+//         if (ext === 'docx' || ext === 'doc') {
+//             document.getElementById('save-btn').innerText = "💾 Save & Lock as PDF";
+//             document.getElementById('save-btn').style.background = "#dc3545";
+//         } else {
+//             document.getElementById('save-btn').innerText = "💾 Save Changes";
+//             document.getElementById('save-btn').style.background = "#28a745";
+//         }
 
 //     } else {
 //         const savedAuth = await window.api.getAuth();
-//         showScreen('auth-screen');
-//         document.getElementById('auth-screen').innerHTML = `
-//             <h2 style="color:#dc3545;">Access Denied</h2>
-//             <p>${response.error}</p>
-//             <p>Logged in as: <b>${savedAuth?.email ?? 'Unknown'}</b></p>
-//             <button class="btn" style="background:#dc3545;margin-top:20px;" onclick="handleLogout()">Switch User / Log Out</button>
-//         `;
+//         authScreen.innerHTML = `<h2 style="color: #dc3545;">Access Denied</h2><p>${response.error}</p><button id="logout-btn" class="btn" style="background: #dc3545; margin-top:20px;">Switch User</button>`;
+//         attachLogout();
 //     }
 // }
 
-// // ── 6. Edit mode ──────────────────────────────────────────────────────────────
 // document.getElementById('edit-btn').addEventListener('click', () => {
-//     if (currentExtension === 'pdf') {
-//         alert('PDFs are flattened secure documents.\n\nAsk the Admin to upload the original .docx to enable editing.');
-//         return;
-//     }
+//     if (currentExtension === 'pdf') return alert("🔒 PDFs are secure. Edit the original .docx file instead.");
+
 //     document.getElementById('edit-btn').style.display = 'none';
 //     document.getElementById('edit-tools').classList.remove('hidden');
 //     document.getElementById('viewer-container').classList.remove('read-only-mode');
 
 //     const editor = document.getElementById('data-editor');
 //     if (editor) {
-//         if (editor.tagName === 'TEXTAREA') {
-//             editor.removeAttribute('readonly');
-//         } else {
-//             editor.setAttribute('contenteditable', 'true');
-//             editor.style.outline = '2px dashed #ffc107';
-//         }
+//         if (editor.tagName === 'TEXTAREA') editor.removeAttribute('readonly');
+//         else { editor.setAttribute('contenteditable', 'true'); editor.style.outline = "2px dashed #ffc107"; }
 //         editor.focus();
 //     }
 // });
 
-// // ── 7. Save edits ─────────────────────────────────────────────────────────────
 // document.getElementById('save-btn').addEventListener('click', async () => {
 //     const editor = document.getElementById('data-editor');
 //     if (!editor) return;
 
-//     document.getElementById('save-btn').innerText = 'Saving to Server…';
-//     let newB64Content = '';
+//     const saveBtn = document.getElementById('save-btn');
+//     saveBtn.innerText = "Encrypting & Saving...";
+//     let newB64Content = "";
+//     let isConvertingToPdf = false;
 
-//     if (['xlsx', 'csv', 'xls'].includes(currentExtension)) {
-//         const table = document.querySelector('#data-editor table');
-//         const workbook = XLSX.utils.table_to_book(table);
-//         newB64Content = XLSX.write(workbook, { type: 'base64', bookType: 'xlsx' });
-//     } else if (['docx', 'doc', 'html', 'htm'].includes(currentExtension)) {
-//         newB64Content = btoa(unescape(encodeURIComponent(editor.innerHTML)));
-//     } else if (editor.tagName === 'TEXTAREA') {
-//         newB64Content = btoa(unescape(encodeURIComponent(editor.value)));
-//     } else {
-//         alert('Cannot save this format.');
-//         document.getElementById('save-btn').innerText = '💾 Save Changes to Server';
-//         return;
-//     }
+//     try {
+//         if (currentExtension === 'docx' || currentExtension === 'doc') {
+//             isConvertingToPdf = true;
+//             saveBtn.innerText = "Generating PDF...";
 
-//     const savedAuth = await window.api.getAuth();
-//     const res = await window.api.saveDocumentEdits({
-//         userId: savedAuth.userId,
-//         docId: currentActiveDocId,
-//         newB64Content,
-//     });
+//             const opt = { margin: 10, filename: 'converted.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+//             const pdfArrayBuffer = await html2pdf().set(opt).from(editor).output('arraybuffer');
 
-//     if (res.success) {
-//         document.getElementById('save-btn').innerText = '✅ Saved!';
-//         document.getElementById('save-btn').style.background = '#28a745';
-//         setTimeout(() => {
-//             document.getElementById('save-btn').innerText = '💾 Save Changes to Server';
-//             document.getElementById('save-btn').style.background = '';
-//         }, 3000);
-//     } else {
-//         alert('❌ SAVE FAILED:\n\n' + res.error + '\n\nCheck the terminal for logs.');
-//         document.getElementById('save-btn').innerText = '⚠️ Retry Save';
-//         document.getElementById('save-btn').style.background = '#dc3545';
+//             const bytes = new Uint8Array(pdfArrayBuffer);
+//             let binary = '';
+//             for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+//             newB64Content = btoa(binary);
+//         } else {
+//             if (currentExtension === 'xlsx' || currentExtension === 'csv' || currentExtension === 'xls') {
+//                 const table = document.querySelector('#data-editor table');
+//                 newB64Content = XLSX.write(XLSX.utils.table_to_book(table), { type: 'base64', bookType: 'xlsx' });
+//             } else if (editor.tagName === 'TEXTAREA') {
+//                 newB64Content = btoa(editor.value);
+//             } else {
+//                 newB64Content = btoa(editor.innerHTML);
+//             }
+//         }
+
+//         const savedAuth = await window.api.getAuth();
+//         const res = await window.api.saveDocumentEdits({
+//             userId: savedAuth.userId, docId: currentActiveDocId, newB64Content: newB64Content, isPdfConversion: isConvertingToPdf
+//         });
+
+//         if (res.success) {
+//             saveBtn.innerText = isConvertingToPdf ? "✅ Locked as PDF!" : "✅ Saved!";
+//             saveBtn.style.background = "#28a745";
+
+//             // Trigger log closure before reload
+//             if (currentLogId) window.api.closeLog(currentLogId);
+
+//             setTimeout(() => { window.location.reload(); }, 2000);
+//         } else {
+//             throw new Error(res.error);
+//         }
+//     } catch (error) {
+//         alert("❌ FAILED TO SAVE:\n" + error.message);
+//         saveBtn.innerText = "⚠️ Retry";
+//         saveBtn.style.background = "#dc3545";
 //     }
 // });
 
-// // ── Utilities ─────────────────────────────────────────────────────────────────
-// function showScreen(id) {
-//     ['login-screen', 'auth-screen', 'main-app'].forEach(s => {
-//         document.getElementById(s).classList.add('hidden');
+// function showSystemReady(email) {
+//     const authScreen = document.getElementById('auth-screen');
+//     authScreen.classList.remove('hidden');
+//     authScreen.innerHTML = `<h2 style="color: #007acc;">System Ready</h2><p>Logged in as: <b>${email}</b></p><button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 20px;">Log Out</button>`;
+//     attachLogout();
+// }
+
+// function attachLogout() {
+//     document.getElementById('logout-btn').addEventListener('click', async () => {
+//         if (currentLogId) window.api.closeLog(currentLogId); // Log out updates duration
+//         await window.api.clearAuth();
+//         window.location.reload();
 //     });
-//     document.getElementById(id).classList.remove('hidden');
 // }
-
-// function showSystemReady(email, userId) {
-//     showScreen('auth-screen');
-//     document.getElementById('auth-screen').innerHTML = `
-//         <h2 style="color:#007acc;">System Ready</h2>
-//         <p>Logged in as: <b>${email}</b></p>
-//         <button class="btn" style="background:#dc3545;margin-top:20px;" onclick="handleLogout()">Log Out</button>
-//     `;
-// }
-
-// async function handleLogout() {
-//     await window.api.clearAuth();
-//     window.location.reload();
-// }
+// document.addEventListener('DOMContentLoaded', initApp);
 
 
 
 
-// // 🔥 GLOBAL SECURITY FIX: Completely disable Right-Clicking everywhere!
-// // This stops downloads, and allows us to remove the PDF overlay so you can scroll/zoom!
+
+
+
+
+
+
+
+
+
+
+//working code
+// // renderer.js
 // window.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // let currentActiveDocId = null;
 // let currentExtension = "";
 
-// // 1. Listen for double-clicked file
-// window.api.onOpenFile((docId) => {
-//     currentActiveDocId = docId;
-//     checkAutoLogin();
-// });
+// const blurShield = document.createElement('div');
+// blurShield.style.position = 'fixed'; blurShield.style.top = '0'; blurShield.style.left = '0';
+// blurShield.style.width = '100vw'; blurShield.style.height = '100vh';
+// blurShield.style.backgroundColor = 'black'; blurShield.style.color = 'red';
+// blurShield.style.display = 'none'; blurShield.style.flexDirection = 'column';
+// blurShield.style.alignItems = 'center'; blurShield.style.justifyContent = 'center';
+// blurShield.style.zIndex = '999999'; blurShield.style.fontFamily = 'sans-serif';
+// blurShield.innerHTML = `
+//     <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+//     <h1 style="margin-top: 20px;">SECURITY LOCK</h1>
+//     <p>Application lost focus. Click here to resume secure viewing.</p>
+// `;
+// document.body.appendChild(blurShield);
+// window.addEventListener('blur', () => { blurShield.style.display = 'flex'; });
+// window.addEventListener('focus', () => { blurShield.style.display = 'none'; });
 
-// // 2. On Startup
-// window.api.getStartupFile().then(docId => {
-//     if (docId) currentActiveDocId = docId;
-//     checkAutoLogin();
-// });
+// async function initApp() {
+//     if (!window.api) return document.body.innerHTML = `<h1 style="color:red; text-align:center; margin-top:20vh;">Bridge Failed</h1>`;
+//     window.api.onOpenFile((docId) => { currentActiveDocId = docId; checkAutoLogin(); });
+//     const startupDocId = await window.api.getStartupFile();
+//     if (startupDocId) currentActiveDocId = startupDocId;
+//     await checkAutoLogin();
+// }
 
-// // 3. SECURE OS-LEVEL AUTO LOGIN
 // async function checkAutoLogin() {
 //     const savedAuth = await window.api.getAuth();
-
 //     if (savedAuth && savedAuth.email && savedAuth.password) {
 //         document.getElementById('login-screen').classList.add('hidden');
 //         document.getElementById('auth-screen').classList.remove('hidden');
 //         document.getElementById('auth-screen').innerHTML = `<h2>Verifying security credentials...</h2>`;
-
-//         const loginResult = await window.api.login({ email: savedAuth.email, password: savedAuth.password });
-
-//         if (loginResult.success) {
-//             if (currentActiveDocId) {
-//                 await loadSecureDocument(loginResult.userId, currentActiveDocId);
-//             } else {
-//                 showSystemReady(savedAuth.email);
-//             }
+//         const res = await window.api.login({ email: savedAuth.email, password: savedAuth.password });
+//         if (res.success) {
+//             if (currentActiveDocId) await loadSecureDocument(res.userId, currentActiveDocId);
+//             else showSystemReady(savedAuth.email);
 //         } else {
 //             await window.api.clearAuth();
 //             document.getElementById('auth-screen').classList.add('hidden');
@@ -517,29 +582,20 @@ document.addEventListener('DOMContentLoaded', initApp);
 //     }
 // }
 
-// // 4. Manual Login
 // document.getElementById('login-btn').addEventListener('click', async () => {
 //     const email = document.getElementById('email').value.trim();
 //     const password = document.getElementById('password').value.trim();
-//     const errorDiv = document.getElementById('login-error');
-
-//     if (!email || !password) return errorDiv.innerText = "Provide email and password.";
-//     errorDiv.innerText = "Authenticating...";
-
-//     const loginResult = await window.api.login({ email, password });
-
-//     if (loginResult.success) {
-//         await window.api.saveAuth({ email, password, userId: loginResult.userId });
+//     if (!email || !password) return;
+//     document.getElementById('login-error').innerText = "Authenticating...";
+//     const res = await window.api.login({ email, password });
+//     if (res.success) {
+//         await window.api.saveAuth({ email, password, userId: res.userId });
 //         document.getElementById('login-screen').classList.add('hidden');
-
-//         if (currentActiveDocId) await loadSecureDocument(loginResult.userId, currentActiveDocId);
+//         if (currentActiveDocId) await loadSecureDocument(res.userId, currentActiveDocId);
 //         else showSystemReady(email);
-//     } else {
-//         errorDiv.innerText = loginResult.error;
-//     }
+//     } else { document.getElementById('login-error').innerText = res.message; }
 // });
 
-// // 5. THE UNIVERSAL DOCUMENT ROUTER
 // async function loadSecureDocument(userId, docId) {
 //     const authScreen = document.getElementById('auth-screen');
 //     authScreen.classList.remove('hidden');
@@ -550,549 +606,167 @@ document.addEventListener('DOMContentLoaded', initApp);
 //     if (response.success) {
 //         authScreen.classList.add('hidden');
 //         document.getElementById('main-app').classList.remove('hidden');
-
 //         const container = document.getElementById('viewer-container');
-//         container.classList.add('read-only-mode'); // Block copy/paste initially
+//         container.classList.add('read-only-mode');
 
 //         const binaryString = atob(response.content);
-
-//         // Advanced File Sniffer
 //         let ext = response.fileName.includes('.') ? response.fileName.split('.').pop().toLowerCase() : '';
+
 //         if (binaryString.startsWith("%PDF")) ext = 'pdf';
 //         else if (binaryString.startsWith("PK")) {
 //             if (binaryString.includes("word/document.xml")) ext = 'docx';
 //             else if (binaryString.includes("xl/worksheets")) ext = 'xlsx';
-//         } else if (binaryString.trim().startsWith("<html") || binaryString.trim().startsWith("<!DOCTYPE html>")) {
-//             ext = 'html'; // Detect pure HTML files
-//         }
+//         } else if (binaryString.trim().startsWith("<html") || binaryString.trim().startsWith("<!DOCTYPE html>")) ext = 'html';
 
 //         currentExtension = ext;
 
-//         // 🟢 ROUTER LOGIC
+//         // 🟢 PDF
 //         if (ext === 'pdf') {
-//             // 🔥 SCROLL FIX: Removed the overlay! PDF native scroll and zoom works now!
 //             const pdfDataUri = `data:application/pdf;base64,${response.content}#toolbar=0&navpanes=0`;
 //             container.innerHTML = `<iframe src="${pdfDataUri}" width="100%" height="100%" style="border: none;" allowfullscreen></iframe>`;
 //         }
+//         // 🟢 WORD (A4 Wrapper)
 //         else if (ext === 'docx' || ext === 'doc') {
-//             if (binaryString.startsWith("<")) {
-//                 container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 50px; width: 800px; min-height: 100vh; margin: 0 auto;">${binaryString}</div>`;
-//             } else {
-//                 const bytes = new Uint8Array(binaryString.length);
-//                 for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-//                 try {
-//                     const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-//                     container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 50px; width: 800px; min-height: 100vh; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.5);">${res.value}</div>`;
-//                 } catch (e) {
-//                     container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Word Document.</div>`;
-//                 }
+//             const bytes = new Uint8Array(binaryString.length);
+//             for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+//             try {
+//                 const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+//                 container.innerHTML = `
+//                 <div style="width: 100%; display: flex; justify-content: center; background-color: #1e1e1e; padding: 20px;">
+//                     <div id="data-editor" style="background: white !important; color: black !important; padding: 60px; width: 210mm; min-height: 297mm; box-shadow: 0 4px 10px rgba(0,0,0,0.8); font-family: Arial, sans-serif; line-height: 1.6; text-align: left;">
+//                         ${res.value}
+//                     </div>
+//                 </div>`;
+//             } catch (e) {
+//                 container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Word Document. It may be corrupted from a previous save. Please re-upload a fresh document.</div>`;
 //             }
 //         }
+//         // 🟢 EXCEL (Slick CSS Grid)
 //         else if (ext === 'xlsx' || ext === 'csv' || ext === 'xls') {
 //             try {
 //                 const workbook = XLSX.read(response.content, { type: 'base64' });
 //                 const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[workbook.SheetNames[0]]);
-//                 container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 20px; width: 95%; height: 95%; overflow: auto; margin: 0 auto;">${htmlStr}</div>`;
+//                 container.innerHTML = `
+//                 <div style="background: #f3f2f1; padding: 20px; width: 100%; height: 100%; overflow: auto;">
+//                     <style>
+//                         #data-editor table { width: 100%; border-collapse: collapse; background: white; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
+//                         #data-editor th, #data-editor td { border: 1px solid #d2d2d2; padding: 8px; text-align: left; }
+//                         #data-editor th { background-color: #e1dfdd; font-weight: bold; }
+//                         #data-editor tr:hover { background-color: #f9f9f9; }
+//                     </style>
+//                     <div id="data-editor" style="box-shadow: 0 2px 6px rgba(0,0,0,0.1);">${htmlStr}</div>
+//                 </div>`;
 //             } catch (e) {
 //                 container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Excel Document.</div>`;
 //             }
 //         }
-//         else if (ext === 'html' || ext === 'htm') {
-//             // 🔥 HTML FIX: Render HTML files beautifully!
-//             container.innerHTML = `<div id="data-editor" style="background: white; color: black; width: 100%; height: 100%; overflow: auto;">${binaryString}</div>`;
-//         }
+//         // 🟢 TEXT / HTML
 //         else {
-//             // 🔥 TXT FIX: Only pure text goes into the Notepad text area
-//             container.innerHTML = `<textarea id="data-editor" style="width: 95%; height: 95%; margin: 20px; background: #2d2d2d; color: white; border: none; padding: 20px; resize:none;" readonly>${binaryString}</textarea>`;
+//             container.innerHTML = `<textarea id="data-editor" style="width: 90%; max-width: 800px; height: 90vh; margin: 20px auto; display: block; background: #2d2d2d; color: #e0e0e0; border: 1px solid #444; border-radius: 8px; padding: 30px; font-family: 'Courier New', monospace; font-size: 14px; resize:none; outline: none;" readonly>${binaryString}</textarea>`;
 //         }
 
-//         // Show Edit Button if they have permissions
-//         if (response.canEdit) {
-//             document.getElementById('edit-btn').style.display = 'block';
-//         } else {
-//             document.getElementById('edit-btn').style.display = 'none';
-//         }
+//         document.getElementById('edit-btn').style.display = response.canEdit ? 'block' : 'none';
 
-//     } else {
-//         const savedAuth = await window.api.getAuth();
-//         authScreen.innerHTML = `
-//             <h2 style="color: #dc3545;">Access Denied</h2>
-//             <p>${response.error}</p>
-//             <p>Logged in as: <b>${savedAuth ? savedAuth.email : 'Unknown'}</b></p>
-//             <button id="logout-btn" class="btn" style="background: #dc3545; margin-top:20px;">Switch User / Log Out</button>
-//         `;
-//         attachLogout();
-//     }
-// }
-
-// // 6. UNLOCK EDIT MODE
-// document.getElementById('edit-btn').addEventListener('click', () => {
-
-//     // 🔥 PDF "Word Mode" Warning
-//     if (currentExtension === 'pdf') {
-//         alert("🔒 PDFs are 'Flattened' secure documents.\n\nTo edit this file like a Word Document, please ask the Admin to upload the original .docx file instead.\n\n(We blocked PDF edits to prevent layout corruption).");
-//         return;
-//     }
-
-//     document.getElementById('edit-btn').style.display = 'none';
-//     document.getElementById('edit-tools').classList.remove('hidden');
-//     document.getElementById('viewer-container').classList.remove('read-only-mode'); // Unlock copy/paste
-
-//     const editor = document.getElementById('data-editor');
-//     if (editor) {
-//         if (editor.tagName === 'TEXTAREA') {
-//             editor.removeAttribute('readonly');
-//         } else {
-//             editor.setAttribute('contenteditable', 'true');
-//             editor.style.outline = "2px dashed #ffc107";
-//         }
-//         editor.focus();
-//     }
-// });
-
-// // 7. SAVE BACK TO DATABASE (WITH LOUD ERRORS)
-// document.getElementById('save-btn').addEventListener('click', async () => {
-//     const editor = document.getElementById('data-editor');
-//     if (editor) {
-//         document.getElementById('save-btn').innerText = "Saving to Server...";
-
-//         let newB64Content = "";
-
-//         if (currentExtension === 'xlsx' || currentExtension === 'csv' || currentExtension === 'xls') {
-//             const table = document.querySelector('#data-editor table');
-//             const workbook = XLSX.utils.table_to_book(table);
-//             newB64Content = XLSX.write(workbook, { type: 'base64', bookType: 'xlsx' });
-//         } else if (currentExtension === 'docx' || currentExtension === 'doc' || currentExtension === 'html') {
-//             newB64Content = btoa(editor.innerHTML);
-//         } else if (editor.tagName === 'TEXTAREA') {
-//             newB64Content = btoa(editor.value);
-//         } else {
-//             alert("Cannot save this format.");
-//             document.getElementById('save-btn').innerText = "💾 Save Changes to Server";
-//             return;
-//         }
-
-//         const savedAuth = await window.api.getAuth();
-//         const res = await window.api.saveDocumentEdits({ userId: savedAuth.userId, docId: currentActiveDocId, newB64Content });
-
-//         if (res.success) {
-//             document.getElementById('save-btn').innerText = "✅ Saved to DB!";
-//             document.getElementById('save-btn').style.background = "#28a745";
-//             setTimeout(() => { document.getElementById('save-btn').innerText = "💾 Save Changes to Server"; }, 3000);
-//         } else {
-//             // 🔥 THE LOUD ERROR FIX: Pop up the exact reason Python/Supabase failed!
-//             alert("❌ FAILED TO SAVE TO DATABASE:\n\n" + res.error + "\n\nPlease check the Python Terminal for exact logs.");
-//             document.getElementById('save-btn').innerText = "⚠️ Retry Save";
+//         // Update Save Button Text for Word Docs
+//         if (ext === 'docx' || ext === 'doc') {
+//             document.getElementById('save-btn').innerText = "💾 Save & Lock as PDF";
 //             document.getElementById('save-btn').style.background = "#dc3545";
-//         }
-//     }
-// });
-
-// // Utilities
-// function showSystemReady(email) {
-//     const authScreen = document.getElementById('auth-screen');
-//     authScreen.classList.remove('hidden');
-//     authScreen.innerHTML = `
-//         <h2 style="color: #007acc;">System Ready</h2>
-//         <p>Logged in as: <b>${email}</b></p>
-//         <button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 20px;">Log Out</button>
-//     `;
-//     attachLogout();
-// }
-
-// function attachLogout() {
-//     document.getElementById('logout-btn').addEventListener('click', async () => {
-//         await window.api.clearAuth();
-//         window.location.reload();
-//     });
-// }
-
-
-
-
-
-
-//this is without error display code , runs blindly
-// let currentActiveDocId = null;
-
-// // 1. Listen for double-clicked file
-// window.api.onOpenFile((docId) => {
-//     currentActiveDocId = docId;
-//     checkAutoLogin();
-// });
-
-// // 2. On Startup
-// window.api.getStartupFile().then(docId => {
-//     if (docId) currentActiveDocId = docId;
-//     checkAutoLogin();
-// });
-
-// // 3. SECURE OS-LEVEL AUTO LOGIN
-// async function checkAutoLogin() {
-//     const savedAuth = await window.api.getAuth(); // 🔥 Reads from OS securely
-
-//     if (savedAuth && savedAuth.email && savedAuth.password) {
-//         document.getElementById('login-screen').classList.add('hidden');
-//         document.getElementById('auth-screen').classList.remove('hidden');
-//         document.getElementById('auth-screen').innerHTML = `<h2>Verifying security credentials...</h2>`;
-
-//         const loginResult = await window.api.login({ email: savedAuth.email, password: savedAuth.password });
-
-//         if (loginResult.success) {
-//             if (currentActiveDocId) {
-//                 await loadSecureDocument(loginResult.userId, currentActiveDocId);
-//             } else {
-//                 showSystemReady(savedAuth.email);
-//             }
 //         } else {
-//             // Password changed. Wipe OS memory.
-//             await window.api.clearAuth();
-//             document.getElementById('auth-screen').classList.add('hidden');
-//             document.getElementById('login-screen').classList.remove('hidden');
-//         }
-//     } else {
-//         document.getElementById('auth-screen').classList.add('hidden');
-//         document.getElementById('login-screen').classList.remove('hidden');
-//     }
-// }
-
-// // 4. Manual Login
-// document.getElementById('login-btn').addEventListener('click', async () => {
-//     const email = document.getElementById('email').value.trim();
-//     const password = document.getElementById('password').value.trim();
-//     const errorDiv = document.getElementById('login-error');
-
-//     if (!email || !password) return errorDiv.innerText = "Provide email and password.";
-//     errorDiv.innerText = "Authenticating...";
-
-//     const loginResult = await window.api.login({ email, password });
-
-//     if (loginResult.success) {
-//         // 🔥 Save to OS permanently
-//         await window.api.saveAuth({ email, password, userId: loginResult.userId });
-
-//         document.getElementById('login-screen').classList.add('hidden');
-//         if (currentActiveDocId) {
-//             await loadSecureDocument(loginResult.userId, currentActiveDocId);
-//         } else {
-//             showSystemReady(email);
-//         }
-//     } else {
-//         errorDiv.innerText = loginResult.error;
-//     }
-// });
-
-
-
-// // 5. THE UNIVERSAL DOCUMENT ROUTER
-// // async function loadSecureDocument(userId, docId) {
-// //     const authScreen = document.getElementById('auth-screen');
-// //     authScreen.classList.remove('hidden');
-// //     authScreen.innerHTML = `<h2>Decrypting file from Vault...</h2>`;
-
-// //     const response = await window.api.verifyAccess({ userId, docId });
-
-// //     if (response.success) {
-// //         authScreen.classList.add('hidden');
-// //         document.getElementById('main-app').classList.remove('hidden');
-
-// //         const container = document.getElementById('viewer-container');
-
-// //         // Lock view mode securely by default (Blocks Copy/Paste)
-// //         container.classList.add('read-only-mode');
-
-// //         // Decode Base64 to Binary String
-// //         const binaryString = atob(response.content);
-
-// //         // 🔥 THE MAGIC SNIFFER: Detect file type even if extension is missing!
-// //         let ext = response.fileName.includes('.') ? response.fileName.split('.').pop().toLowerCase() : '';
-
-// //         if (binaryString.startsWith("%PDF")) {
-// //             ext = 'pdf';
-// //         } else if (binaryString.startsWith("PK")) {
-// //             // 'PK' is the secret ZIP header for Word and Excel files!
-// //             if (binaryString.includes("word/document.xml")) ext = 'docx';
-// //             else if (binaryString.includes("xl/worksheets")) ext = 'xlsx';
-// //         }
-
-// //         // 🟢 ROUTER LOGIC
-// //         if (ext === 'pdf') {
-// //             const pdfDataUri = `data:application/pdf;base64,${response.content}`;
-// //             container.innerHTML = `
-// //                 <div id="pdf-overlay" style="position:absolute; width:100%; height:100%; z-index:10;"></div>
-// //                 <iframe src="${pdfDataUri}" width="100%" height="100%" style="border: none;" allowfullscreen></iframe>
-// //             `;
-// //         }
-// //         else if (ext === 'docx' || ext === 'doc') {
-// //             const bytes = new Uint8Array(binaryString.length);
-// //             for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-
-// //             try {
-// //                 const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-// //                 container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 50px; width: 800px; min-height: 100vh; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.5);">${res.value}</div>`;
-// //             } catch (e) {
-// //                 container.innerHTML = `<div style="color:red; padding: 20px;">Failed to render Word Document. Error: ${e.message}</div>`;
-// //             }
-// //         }
-// //         else if (ext === 'xlsx' || ext === 'csv' || ext === 'xls') {
-// //             try {
-// //                 const workbook = XLSX.read(response.content, { type: 'base64' });
-// //                 const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[workbook.SheetNames[0]]);
-// //                 container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 20px; width: 95%; height: 95%; overflow: auto; margin: 0 auto;">${htmlStr}</div>`;
-// //             } catch (e) {
-// //                 container.innerHTML = `<div style="color:red; padding: 20px;">Failed to render Excel Document.</div>`;
-// //             }
-// //         }
-// //         else { // TEXT FILES (.txt, etc)
-// //             container.innerHTML = `<textarea id="data-editor" style="width: 95%; height: 95%; margin: 20px; background: #2d2d2d; color: white; border: none; padding: 20px; resize:none;" readonly>${binaryString}</textarea>`;
-// //         }
-
-// //         // 🟢 EDIT BUTTON LOGIC (Only appears if user has edit rights!)
-// //         if (response.canEdit) {
-// //             document.getElementById('edit-btn').style.display = 'block';
-// //         } else {
-// //             document.getElementById('edit-btn').style.display = 'none';
-// //         }
-
-// //     } else {
-// //         const savedAuth = await window.api.getAuth();
-// //         authScreen.innerHTML = `
-// //             <h2 style="color: #dc3545;">Access Denied</h2>
-// //             <p>${response.error}</p>
-// //             <p>Logged in as: <b>${savedAuth ? savedAuth.email : 'Unknown'}</b></p>
-// //             <button id="logout-btn" class="btn" style="background: #dc3545;">Switch User / Log Out</button>
-// //         `;
-// //         attachLogout();
-// //     }
-// // }
-
-// // 6. UNLOCK EDIT MODE
-// // document.getElementById('edit-btn').addEventListener('click', () => {
-// //     document.getElementById('edit-btn').style.display = 'none';
-// //     document.getElementById('edit-tools').classList.remove('hidden');
-
-// //     // 1. Remove the strict copy/paste block!
-// //     document.getElementById('viewer-container').classList.remove('read-only-mode');
-
-// //     // 2. Make the data actually typable/editable!
-// //     const editor = document.getElementById('data-editor');
-// //     if (editor) {
-// //         if (editor.tagName === 'TEXTAREA') {
-// //             editor.removeAttribute('readonly');
-// //         } else {
-// //             editor.setAttribute('contenteditable', 'true'); // Allows typing over Word/Excel HTML
-// //             editor.style.outline = "2px solid #007acc";
-// //         }
-// //         editor.focus();
-// //     } else {
-// //         // If it's a PDF, remove the invisible overlay to allow copying
-// //         const overlay = document.getElementById('pdf-overlay');
-// //         if (overlay) overlay.style.display = 'none';
-// //     }
-// // });
-
-// // 7. SAVE BACK TO DATABASE
-// // document.getElementById('save-btn').addEventListener('click', async () => {
-// //     const editor = document.getElementById('data-editor');
-// //     if (editor) {
-// //         document.getElementById('save-btn').innerText = "Saving...";
-
-// //         let newRawText = "";
-// //         if (editor.tagName === 'TEXTAREA') newRawText = editor.value;
-// //         else newRawText = editor.innerHTML; // Saves the modified HTML for Word/Excel
-
-// //         // Convert to base64
-// //         const newB64Content = btoa(newRawText);
-
-// //         const savedAuth = await window.api.getAuth();
-// //         const res = await window.api.saveDocumentEdits({ userId: savedAuth.userId, docId: currentActiveDocId, newB64Content });
-
-// //         if (res.success) {
-// //             document.getElementById('save-btn').innerText = "✅ Saved to DB!";
-// //             setTimeout(() => { document.getElementById('save-btn').innerText = "💾 Save Changes to Server"; }, 2000);
-// //         } else {
-// //             alert("Save Failed: " + res.error);
-// //             document.getElementById('save-btn').innerText = "💾 Save Changes to Server";
-// //         }
-// //     } else {
-// //         alert("Native PDF editing is restricted. Save works for Data/Text files.");
-// //     }
-// // });
-
-
-
-// let currentExtension = ""; // Tracks if we are editing Excel, Word, or PDF
-
-// // 5. THE UNIVERSAL DOCUMENT ROUTER
-// async function loadSecureDocument(userId, docId) {
-//     const authScreen = document.getElementById('auth-screen');
-//     authScreen.classList.remove('hidden');
-//     authScreen.innerHTML = `<h2>Decrypting file from Vault...</h2>`;
-
-//     const response = await window.api.verifyAccess({ userId, docId });
-
-//     if (response.success) {
-//         authScreen.classList.add('hidden');
-//         document.getElementById('main-app').classList.remove('hidden');
-
-//         const container = document.getElementById('viewer-container');
-//         container.classList.add('read-only-mode'); // Lock down copy/paste by default
-
-//         const binaryString = atob(response.content);
-
-//         // Get extension
-//         let ext = response.fileName.includes('.') ? response.fileName.split('.').pop().toLowerCase() : '';
-//         if (binaryString.startsWith("%PDF")) ext = 'pdf';
-//         else if (binaryString.startsWith("PK")) {
-//             if (binaryString.includes("word/document.xml")) ext = 'docx';
-//             else if (binaryString.includes("xl/worksheets")) ext = 'xlsx';
-//         }
-
-//         currentExtension = ext; // Save globally so the Save button knows what to do
-
-//         // 🟢 ROUTER LOGIC
-//         if (ext === 'pdf') {
-//             // 🔥 THE LEAK FIX: Add #toolbar=0 to destroy the Download/Print buttons!
-//             const pdfDataUri = `data:application/pdf;base64,${response.content}#toolbar=0&navpanes=0&scrollbar=0`;
-//             container.innerHTML = `
-//                 <div id="pdf-overlay" style="position:absolute; width:100%; height:100%; z-index:10;"></div>
-//                 <iframe src="${pdfDataUri}" width="100%" height="100%" style="border: none;" allowfullscreen></iframe>
-//             `;
-//         }
-//         else if (ext === 'docx' || ext === 'doc') {
-//             // Word Logic
-//             if (binaryString.startsWith("<")) {
-//                 // If it was previously edited, load the raw HTML
-//                 container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 50px; width: 800px; min-height: 100vh; margin: 0 auto;">${binaryString}</div>`;
-//             } else {
-//                 const bytes = new Uint8Array(binaryString.length);
-//                 for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-//                 try {
-//                     const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-//                     container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 50px; width: 800px; min-height: 100vh; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.5);">${res.value}</div>`;
-//                 } catch (e) {
-//                     container.innerHTML = `<div style="color:red;">Failed to render Word Document.</div>`;
-//                 }
-//             }
-//         }
-//         else if (ext === 'xlsx' || ext === 'csv' || ext === 'xls') {
-//             // Excel Logic
-//             try {
-//                 const workbook = XLSX.read(response.content, { type: 'base64' });
-//                 const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[workbook.SheetNames[0]]);
-//                 container.innerHTML = `<div id="data-editor" style="background: white; color: black; padding: 20px; width: 95%; height: 95%; overflow: auto; margin: 0 auto;">${htmlStr}</div>`;
-//             } catch (e) {
-//                 container.innerHTML = `<div style="color:red;">Failed to render Excel Document.</div>`;
-//             }
-//         }
-//         else {
-//             // Text Files
-//             container.innerHTML = `<textarea id="data-editor" style="width: 95%; height: 95%; margin: 20px; background: #2d2d2d; color: white; border: none; padding: 20px; resize:none;" readonly>${binaryString}</textarea>`;
-//         }
-
-//         // Show Edit Button if permitted
-//         if (response.canEdit) {
-//             document.getElementById('edit-btn').style.display = 'block';
-//         } else {
-//             document.getElementById('edit-btn').style.display = 'none';
+//             document.getElementById('save-btn').innerText = "💾 Save Changes";
+//             document.getElementById('save-btn').style.background = "#28a745";
 //         }
 
 //     } else {
-//         // ... (Your existing error logic stays the same) ...
 //         const savedAuth = await window.api.getAuth();
-//         authScreen.innerHTML = `<h2 style="color: #dc3545;">Access Denied</h2><p>${response.error}</p>`;
+//         authScreen.innerHTML = `<h2 style="color: #dc3545;">Access Denied</h2><p>${response.error}</p><button id="logout-btn" class="btn" style="background: #dc3545; margin-top:20px;">Switch User</button>`;
 //         attachLogout();
 //     }
 // }
 
-// // 6. UNLOCK EDIT MODE (The "I can write" Fix)
 // document.getElementById('edit-btn').addEventListener('click', () => {
+//     if (currentExtension === 'pdf') return alert("🔒 PDFs are secure. Edit the original .docx file instead.");
+
 //     document.getElementById('edit-btn').style.display = 'none';
 //     document.getElementById('edit-tools').classList.remove('hidden');
-
-//     // Remove strict copy/paste block
 //     document.getElementById('viewer-container').classList.remove('read-only-mode');
 
-//     // 🔥 Make the data TYPABLE
 //     const editor = document.getElementById('data-editor');
 //     if (editor) {
-//         if (editor.tagName === 'TEXTAREA') {
-//             editor.removeAttribute('readonly');
-//         } else {
-//             // THIS TURNS ON EXCEL AND WORD TYPING
-//             editor.setAttribute('contenteditable', 'true');
-//             editor.style.outline = "2px solid #007acc";
-//         }
+//         if (editor.tagName === 'TEXTAREA') editor.removeAttribute('readonly');
+//         else { editor.setAttribute('contenteditable', 'true'); editor.style.outline = "2px dashed #ffc107"; }
 //         editor.focus();
-//     } else {
-//         const overlay = document.getElementById('pdf-overlay');
-//         if (overlay) overlay.style.display = 'none';
 //     }
 // });
 
-// // 7. SAVE BACK TO DATABASE (The "Pack it back up" Fix)
+// // 🔥 THE NEW SAVE/CONVERT ENGINE
 // document.getElementById('save-btn').addEventListener('click', async () => {
 //     const editor = document.getElementById('data-editor');
-//     if (editor) {
-//         document.getElementById('save-btn').innerText = "Saving...";
+//     if (!editor) return;
 
-//         let newB64Content = "";
+//     const saveBtn = document.getElementById('save-btn');
+//     saveBtn.innerText = "Encrypting & Saving...";
+//     let newB64Content = "";
+//     let isConvertingToPdf = false;
 
-//         // Determine how to save based on the file type!
-//         if (currentExtension === 'xlsx' || currentExtension === 'csv' || currentExtension === 'xls') {
-//             // 🔥 MAGIC: Convert the edited HTML table back into a pure XLSX file!
-//             const table = document.querySelector('#data-editor table');
-//             const workbook = XLSX.utils.table_to_book(table);
-//             newB64Content = XLSX.write(workbook, { type: 'base64', bookType: 'xlsx' });
+//     try {
+//         // 🟢 PDF CONVERSION (Word Docs)
+//         if (currentExtension === 'docx' || currentExtension === 'doc') {
+//             isConvertingToPdf = true;
+//             saveBtn.innerText = "Generating PDF...";
 
-//         } else if (currentExtension === 'docx' || currentExtension === 'doc') {
-//             // Save the raw HTML string they typed
-//             newB64Content = btoa(editor.innerHTML);
+//             const opt = { margin: 10, filename: 'converted.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+//             const pdfArrayBuffer = await html2pdf().set(opt).from(editor).output('arraybuffer');
 
-//         } else if (editor.tagName === 'TEXTAREA') {
-//             // Save pure text
-//             newB64Content = btoa(editor.value);
-
-//         } else {
-//             alert("Cannot save this format.");
-//             document.getElementById('save-btn').innerText = "💾 Save Changes to Server";
-//             return;
+//             const bytes = new Uint8Array(pdfArrayBuffer);
+//             let binary = '';
+//             for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+//             newB64Content = btoa(binary);
+//         }
+//         // 🟢 EXCEL & TEXT (Normal Save)
+//         else {
+//             if (currentExtension === 'xlsx' || currentExtension === 'csv' || currentExtension === 'xls') {
+//                 const table = document.querySelector('#data-editor table');
+//                 newB64Content = XLSX.write(XLSX.utils.table_to_book(table), { type: 'base64', bookType: 'xlsx' });
+//             } else if (editor.tagName === 'TEXTAREA') {
+//                 newB64Content = btoa(editor.value);
+//             } else {
+//                 newB64Content = btoa(editor.innerHTML);
+//             }
 //         }
 
-//         // Send to backend
 //         const savedAuth = await window.api.getAuth();
-//         const res = await window.api.saveDocumentEdits({ userId: savedAuth.userId, docId: currentActiveDocId, newB64Content });
+//         const res = await window.api.saveDocumentEdits({
+//             userId: savedAuth.userId,
+//             docId: currentActiveDocId,
+//             newB64Content: newB64Content,
+//             isPdfConversion: isConvertingToPdf // Pass this flag to the backend!
+//         });
 
 //         if (res.success) {
-//             document.getElementById('save-btn').innerText = "✅ Saved to DB!";
-//             setTimeout(() => { document.getElementById('save-btn').innerText = "💾 Save Changes to Server"; }, 2000);
+//             saveBtn.innerText = isConvertingToPdf ? "✅ Locked as PDF!" : "✅ Saved!";
+//             saveBtn.style.background = "#28a745";
+//             setTimeout(() => { window.location.reload(); }, 2000); // Reload to view changes
 //         } else {
-//             alert("Save Failed: " + res.error);
-//             document.getElementById('save-btn').innerText = "💾 Save Changes to Server";
+//             throw new Error(res.error);
 //         }
-//     } else {
-//         alert("Native PDF editing is restricted.");
+
+//     } catch (error) {
+//         alert("❌ FAILED TO SAVE:\n" + error.message);
+//         saveBtn.innerText = "⚠️ Retry";
+//         saveBtn.style.background = "#dc3545";
 //     }
 // });
 
-// // Utilities
 // function showSystemReady(email) {
 //     const authScreen = document.getElementById('auth-screen');
 //     authScreen.classList.remove('hidden');
-//     authScreen.innerHTML = `
-//         <h2 style="color: #007acc;">System Ready</h2>
-//         <p>Logged in as: <b>${email}</b></p>
-//         <button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 20px;">Log Out</button>
-//     `;
+//     authScreen.innerHTML = `<h2 style="color: #007acc;">System Ready</h2><p>Logged in as: <b>${email}</b></p><button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 20px;">Log Out</button>`;
 //     attachLogout();
 // }
-
 // function attachLogout() {
-//     document.getElementById('logout-btn').addEventListener('click', async () => {
-//         await window.api.clearAuth();
-//         window.location.reload();
-//     });
+//     document.getElementById('logout-btn').addEventListener('click', async () => { await window.api.clearAuth(); window.location.reload(); });
 // }
+// document.addEventListener('DOMContentLoaded', initApp);
 
 
 
@@ -1110,184 +784,3 @@ document.addEventListener('DOMContentLoaded', initApp);
 
 
 
-
-
-
-
-
-// let currentActiveDocId = null;
-
-// // 1. Listen for double-clicked file (App already open)
-// window.api.onOpenFile((docId) => {
-//     currentActiveDocId = docId;
-//     checkAutoLogin();
-// });
-
-// // 2. On Startup (Check if app was launched via double-click)
-// window.api.getStartupFile().then(docId => {
-//     if (docId) {
-//         currentActiveDocId = docId;
-//     }
-//     checkAutoLogin();
-// });
-
-// // 3. The Core Auto-Login & Verification Engine
-// async function checkAutoLogin() {
-//     const savedEmail = localStorage.getItem('vdr_email');
-//     const savedPassword = localStorage.getItem('vdr_password');
-
-//     if (savedEmail && savedPassword) {
-//         document.getElementById('login-screen').classList.add('hidden');
-//         document.getElementById('auth-screen').classList.remove('hidden');
-//         document.getElementById('auth-screen').innerHTML = `<h2>Verifying security credentials...</h2>`;
-
-//         // Ping the database to verify the password hasn't changed
-//         const loginResult = await window.api.login({ email: savedEmail, password: savedPassword });
-
-//         if (loginResult.success) {
-//             // Password verified! Now check the file.
-//             if (currentActiveDocId) {
-//                 await loadSecureDocument(loginResult.userId, currentActiveDocId);
-//             } else {
-//                 // Logged in, but they just opened the app without a file
-//                 showSystemReady(savedEmail);
-//             }
-//         } else {
-//             // Password changed or user deleted! Wipe memory.
-//             localStorage.clear();
-//             document.getElementById('auth-screen').classList.add('hidden');
-//             document.getElementById('login-screen').classList.remove('hidden');
-//         }
-//     } else {
-//         // No saved credentials, show login screen
-//         document.getElementById('auth-screen').classList.add('hidden');
-//         document.getElementById('login-screen').classList.remove('hidden');
-//     }
-// }
-
-// // 4. Manual Login Button
-// document.getElementById('login-btn').addEventListener('click', async () => {
-//     const email = document.getElementById('email').value.trim();
-//     const password = document.getElementById('password').value.trim();
-
-//     // Create an error div if it doesn't exist
-//     let errorDiv = document.getElementById('login-error');
-//     if (!errorDiv) {
-//         errorDiv = document.createElement('div');
-//         errorDiv.id = 'login-error';
-//         errorDiv.style.color = 'red';
-//         errorDiv.style.marginTop = '10px';
-//         document.getElementById('login-btn').after(errorDiv);
-//     }
-
-//     if (!email || !password) return errorDiv.innerText = "Provide email and password.";
-//     errorDiv.innerText = "Authenticating...";
-
-//     const loginResult = await window.api.login({ email, password });
-
-//     if (loginResult.success) {
-//         // Save credentials locally for next time
-//         localStorage.setItem('vdr_email', email);
-//         localStorage.setItem('vdr_password', password);
-//         localStorage.setItem('vdr_user_id', loginResult.userId); // Save ID for DB checks
-
-//         document.getElementById('login-screen').classList.add('hidden');
-
-//         if (currentActiveDocId) {
-//             await loadSecureDocument(loginResult.userId, currentActiveDocId);
-//         } else {
-//             showSystemReady(email);
-//         }
-//     } else {
-//         errorDiv.innerText = loginResult.error;
-//     }
-// });
-
-// // 5. Cloud Decryption & Access Check
-// async function loadSecureDocument(userId, docId) {
-//     const authScreen = document.getElementById('auth-screen');
-//     authScreen.classList.remove('hidden');
-//     authScreen.innerHTML = `<h2>Decrypting file from Vault...</h2>`;
-
-//     // Talk to main.js to check permissions AND download the file
-//     const response = await window.api.verifyAccess({ userId, docId });
-
-//     // if (response.success) {
-//     //     // Access Granted! Show the file!
-//     //     authScreen.classList.add('hidden');
-//     //     document.getElementById('main-app').classList.remove('hidden');
-
-//     //     const container = document.getElementById('document-container');
-//     //     container.innerHTML = `
-//     //         <div class="page" data-page="1">
-//     //             <p style="white-space: pre-wrap; color: #333;">${response.content}</p>
-//     //         </div>
-//     //     `;
-
-
-//     if (response.success) {
-//         // Access Granted! Show the file!
-//         authScreen.classList.add('hidden');
-//         document.getElementById('main-app').classList.remove('hidden');
-
-//         // 🔥 FIX 1: Grab the correct ID from your HTML ('viewer-container')
-//         const container = document.getElementById('viewer-container');
-
-//         // 🔥 FIX 2: Format the Base64 string so the browser knows it's a PDF
-//         const pdfDataUri = `data:application/pdf;base64,${response.content}`;
-
-//         // 🔥 FIX 3: Inject the iframe, not a <p> text tag!
-//         container.innerHTML = `
-//             <iframe
-//                 src="${pdfDataUri}"
-//                 width="100%"
-//                 height="100%"
-//                 style="border: none; min-height: 80vh;"
-//                 allowfullscreen>
-//             </iframe>
-//         `;
-
-//         // Optional: Use response.canEdit here to show/hide your edit buttons!
-//         if (response.canEdit) {
-//             document.getElementById('edit-btn').style.display = 'inline-block';
-//         } else {
-//             document.getElementById('edit-btn').style.display = 'none';
-//         }
-
-//     } else {
-//         // ACCESS DENIED! Tell them why, and let them switch users.
-//         const savedEmail = localStorage.getItem('vdr_email');
-//         authScreen.innerHTML = `
-//             <h2 style="color: #dc3545;">Access Denied</h2>
-//             <p>${response.error}</p>
-//             <p style="margin-bottom: 20px;">You are currently logged in as: <b>${savedEmail}</b></p>
-//             <button id="logout-btn" style="background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
-//                 Switch User / Log Out
-//             </button>
-//         `;
-//         attachLogout();
-//     }
-// }
-
-// // Helper: Show when app is open but no file is clicked
-// function showSystemReady(email) {
-//     const authScreen = document.getElementById('auth-screen');
-//     authScreen.classList.remove('hidden');
-//     authScreen.innerHTML = `
-//         <h2 style="color: #007acc;">System Ready</h2>
-//         <p>Logged in as: <b>${email}</b></p>
-//         <p style="margin-bottom: 20px;">Leave this window open and double-click a .vdr file.</p>
-//         <button id="logout-btn" style="background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
-//             Log Out
-//         </button>
-//     `;
-//     attachLogout();
-// }
-
-// // Helper: Wipe memory and restart
-// function attachLogout() {
-//     document.getElementById('logout-btn').addEventListener('click', () => {
-//         localStorage.clear(); // Nukes the saved email/password
-//         window.location.reload(); // Instantly restarts the UI
-//     });
-// }

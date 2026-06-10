@@ -6,21 +6,38 @@ let currentExtension = "";
 let currentLogId = null;
 let rawDecryptedContent = null;
 let currentFileName = "";
-let checkedOutPath = null; // Tracks the temp file
+let checkedOutPath = null;
+
+// 🔥 OS-LEVEL SECURITY SHIELD (Locks on Alt-Tab)
+const blurShield = document.createElement('div');
+blurShield.style.position = 'fixed'; blurShield.style.top = '0'; blurShield.style.left = '0';
+blurShield.style.width = '100vw'; blurShield.style.height = '100vh';
+blurShield.style.backgroundColor = 'black'; blurShield.style.color = 'red';
+blurShield.style.display = 'none'; blurShield.style.flexDirection = 'column';
+blurShield.style.alignItems = 'center'; blurShield.style.justifyContent = 'center';
+blurShield.style.zIndex = '999999'; blurShield.style.fontFamily = 'sans-serif';
+blurShield.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg><h1 style="margin-top: 20px;">SECURITY LOCK</h1>`;
+document.body.appendChild(blurShield);
+window.addEventListener('blur', () => { blurShield.style.display = 'flex'; });
+window.addEventListener('focus', () => { blurShield.style.display = 'none'; });
+
+window.addEventListener('beforeunload', () => {
+    if (currentLogId) window.api.closeLog(currentLogId);
+});
 
 async function initApp() {
-    if (!window.api) return document.body.innerHTML = `<h1 style="color:red; text-align:center;">Bridge Failed</h1>`;
+    if (!window.api) return console.error("Bridge missing");
 
-    window.api.onSyncSuccess((msg) => {
-        const btn = document.getElementById('checkout-btn');
-        if (btn) {
-            btn.innerText = "✅ Saved to Vault!";
-            btn.style.background = "#28a745";
-            setTimeout(() => { btn.innerText = "Check In & Close"; btn.style.background = "#dc3545"; }, 3000);
-        }
+    window.api.onSyncSuccess(async (msg) => {
+        const btn = document.getElementById('checkout-office-btn');
+        if (btn) { btn.innerText = "✅ Saved & Office Killed!"; btn.style.background = "#28a745"; }
+
+        setTimeout(async () => {
+            const savedAuth = await window.api.getAuth();
+            loadSecureDocument(savedAuth.userId, currentActiveDocId);
+        }, 1500);
     });
 
-    window.api.onOpenFile((docId) => { currentActiveDocId = docId; checkAutoLogin(); });
     await checkAutoLogin();
 }
 
@@ -28,15 +45,8 @@ async function checkAutoLogin() {
     const savedAuth = await window.api.getAuth();
     if (savedAuth && savedAuth.email && savedAuth.password) {
         document.getElementById('login-screen').classList.add('hidden');
-        document.getElementById('auth-screen').classList.remove('hidden');
-        document.getElementById('auth-screen').innerHTML = `<h2>Verifying security credentials...</h2>`;
-        const res = await window.api.login({ email: savedAuth.email, password: savedAuth.password });
-        if (res.success) { showSystemReady(savedAuth.email); }
-        else { await window.api.clearAuth(); document.getElementById('auth-screen').classList.add('hidden'); document.getElementById('login-screen').classList.remove('hidden'); }
-    } else {
-        document.getElementById('auth-screen').classList.add('hidden');
-        document.getElementById('login-screen').classList.remove('hidden');
-    }
+        showSystemReady(savedAuth.email);
+    } else { document.getElementById('login-screen').classList.remove('hidden'); }
 }
 
 document.getElementById('login-btn').addEventListener('click', async () => {
@@ -52,10 +62,43 @@ document.getElementById('login-btn').addEventListener('click', async () => {
     } else { document.getElementById('login-error').innerText = res.message; }
 });
 
+function showSystemReady(email) {
+    document.getElementById('auth-screen').classList.remove('hidden');
+    document.getElementById('main-app').classList.add('hidden');
+    document.getElementById('user-email-display').innerText = email;
+}
+
+document.getElementById('logout-btn').addEventListener('click', async () => {
+    if (currentLogId) window.api.closeLog(currentLogId);
+    await window.api.clearAuth(); window.location.reload();
+});
+
+document.getElementById('open-file-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('open-file-btn');
+    btn.innerText = "Opening File Explorer...";
+    const res = await window.api.openFileDialog();
+    if (res.success && res.docId) {
+        btn.innerText = "Decrypting File...";
+        const savedAuth = await window.api.getAuth();
+        await loadSecureDocument(savedAuth.userId, res.docId);
+        btn.innerText = "📂 Browse & Open .vdr File";
+    } else { btn.innerText = "📂 Browse & Open .vdr File"; }
+});
+
+document.getElementById('close-file-btn').addEventListener('click', () => {
+    if (currentLogId) window.api.closeLog(currentLogId);
+    document.getElementById('main-app').classList.add('hidden');
+    document.getElementById('auth-screen').classList.remove('hidden');
+});
+
 async function loadSecureDocument(userId, docId) {
-    const authScreen = document.getElementById('auth-screen');
-    authScreen.classList.remove('hidden');
-    authScreen.innerHTML = `<h2>Decrypting file from Vault...</h2>`;
+    document.getElementById('auth-screen').classList.add('hidden');
+    document.getElementById('main-app').classList.remove('hidden');
+
+    document.getElementById('edit-txt-btn').classList.add('hidden');
+    document.getElementById('edit-txt-tools').classList.add('hidden');
+    document.getElementById('checkout-office-btn').classList.add('hidden');
+    document.getElementById('doc-title').innerText = "Loading...";
 
     const response = await window.api.verifyAccess({ userId, docId });
 
@@ -65,138 +108,123 @@ async function loadSecureDocument(userId, docId) {
         rawDecryptedContent = response.content;
         currentFileName = response.fileName;
 
-        authScreen.classList.add('hidden');
-        document.getElementById('main-app').classList.remove('hidden');
+        document.getElementById('doc-title').innerText = currentFileName;
         const container = document.getElementById('viewer-container');
         container.classList.add('read-only-mode');
 
         const binaryString = atob(response.content);
         let ext = response.fileName.includes('.') ? response.fileName.split('.').pop().toLowerCase() : '';
-
-        if (binaryString.startsWith("%PDF")) ext = 'pdf';
-        else if (binaryString.startsWith("PK")) {
-            if (binaryString.includes("word/document.xml")) ext = 'docx';
-            else if (binaryString.includes("xl/worksheets")) ext = 'xlsx';
-        } else if (binaryString.trim().startsWith("<html") || binaryString.trim().startsWith("<!DOCTYPE html>")) ext = 'html';
-
         currentExtension = ext;
 
         if (ext === 'pdf') {
             const pdfDataUri = `data:application/pdf;base64,${response.content}#toolbar=0&navpanes=0`;
-            container.innerHTML = `<iframe src="${pdfDataUri}" width="100%" height="100%" style="border: none;" allowfullscreen></iframe>`;
+            container.innerHTML = `<iframe src="${pdfDataUri}" width="100%" height="100%" style="border: none; background: white;" allowfullscreen></iframe>`;
         }
         else if (ext === 'docx' || ext === 'doc') {
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
             try {
                 const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-                container.innerHTML = `<div style="width: 100%; display: flex; justify-content: center; background-color: #1e1e1e; padding: 20px;"><div id="data-editor" style="background: white !important; color: black !important; padding: 60px; width: 210mm; min-height: 297mm; box-shadow: 0 4px 10px rgba(0,0,0,0.8); font-family: Arial, sans-serif; line-height: 1.6; text-align: left;">${res.value}</div></div>`;
-            } catch (e) { container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Word Document.</div>`; }
+                // 🔥 THE FIX: Removed height limits so it expands downwards naturally!
+                container.innerHTML = `<div style="width: 100%; padding: 40px; background-color: #1e1e1e; display: flex; justify-content: center;"><div style="background: white !important; color: black !important; padding: 60px; width: 210mm; min-height: 297mm; height: max-content; box-shadow: 0 4px 15px rgba(0,0,0,0.5); font-family: 'Arial', sans-serif; line-height: 1.6; text-align: left; overflow-wrap: break-word;">${res.value}</div></div>`;
+            } catch (e) { container.innerHTML = `<div style="color:red; padding: 20px;">Failed to render Word Doc.</div>`; }
         }
         else if (ext === 'xlsx' || ext === 'csv' || ext === 'xls') {
             try {
                 const workbook = XLSX.read(response.content, { type: 'base64' });
                 const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[workbook.SheetNames[0]]);
-                container.innerHTML = `<div id="data-editor" style="background: white; padding: 20px; width: 100%; height: 100%; overflow: auto;">${htmlStr}</div>`;
-            } catch (e) { container.innerHTML = `<div style="color:red; padding:20px;">Failed to render Excel Document.</div>`; }
+                // 🔥 THE FIX: Sticky Headers and Nowrap for perfect Excel structure
+                container.innerHTML = `
+                <div style="background: white; padding: 20px; width: 100%; height: 100%; overflow: auto;">
+                    <style>
+                        #excel-table table { border-collapse: collapse; min-width: 100%; font-family: 'Segoe UI', sans-serif; font-size: 14px; color: black; }
+                        #excel-table th, #excel-table td { border: 1px solid #d2d2d2; padding: 8px 12px; text-align: left; white-space: nowrap; }
+                        #excel-table th { background-color: #f3f2f1; font-weight: 600; border-bottom: 2px solid #ccc; position: sticky; top: 0; }
+                    </style>
+                    <div id="excel-table">${htmlStr}</div>
+                </div>`;
+            } catch (e) { container.innerHTML = `<div style="color:red; padding: 20px;">Failed to render Excel.</div>`; }
         }
         else {
-            container.innerHTML = `<textarea id="data-editor" style="width: 90%; max-width: 800px; height: 90vh; margin: 20px auto; display: block; background: #2d2d2d; color: #e0e0e0; border: 1px solid #444; border-radius: 8px; padding: 30px; font-family: 'Courier New', monospace; font-size: 14px; resize:none; outline: none;" readonly>${binaryString}</textarea>`;
+            container.innerHTML = `<textarea style="width: 90%; max-width: 900px; height: 90vh; background: #2d2d2d; color: white; padding: 30px; font-family: monospace; resize:none; outline: none; border:none; margin-top: 20px;" readonly>${binaryString}</textarea>`;
         }
 
-        // 🔥 THE NEW EDIT LOGIC
         if (response.canEdit) {
-            if (ext === 'pdf') {
-                document.getElementById('edit-btn').style.display = 'none';
-            } else if (ext === 'txt' || ext === 'html') {
-                // Live HTML editing for basic text
-                document.getElementById('edit-btn').style.display = 'block';
-                document.getElementById('edit-btn').innerText = "Edit Text";
-            } else {
-                // Native OS Checkout for MS Office
-                document.getElementById('edit-btn').style.display = 'block';
-                document.getElementById('edit-btn').innerText = "Edit in MS Office";
-                document.getElementById('edit-btn').style.background = "#007acc";
+            if (ext === 'txt' || ext === 'html') {
+                document.getElementById('edit-txt-btn').classList.remove('hidden');
+            } else if (ext === 'docx' || ext === 'doc' || ext === 'xlsx' || ext === 'xls') {
+                const checkBtn = document.getElementById('checkout-office-btn');
+                checkBtn.classList.remove('hidden');
+                checkBtn.innerText = "📝 Edit in MS Office";
+                checkBtn.style.background = "#007acc";
             }
-        } else {
-            document.getElementById('edit-btn').style.display = 'none';
         }
 
     } else {
-        alert("Access Denied: " + response.error);
+        document.getElementById('main-app').classList.add('hidden');
+        document.getElementById('auth-screen').classList.remove('hidden');
+        document.getElementById('auth-screen').innerHTML += `
+            <div style="margin-top: 20px; padding: 15px; background: rgba(220, 53, 69, 0.2); border: 1px solid #dc3545; border-radius: 5px;">
+                <h3 style="color: #dc3545; margin:0 0 10px 0;">Security Violation</h3>
+                <p style="margin:0; font-size: 14px;">${response.error}</p>
+            </div>`;
     }
 }
 
-// 🔥 SECURE NATIVE EDITING 
-document.getElementById('edit-btn').addEventListener('click', async () => {
-    if (currentExtension === 'txt' || currentExtension === 'html') {
-        // Standard Live Edit
-        document.getElementById('edit-btn').style.display = 'none';
-        document.getElementById('edit-tools').classList.remove('hidden');
-        document.getElementById('viewer-container').classList.remove('read-only-mode');
-        const editor = document.getElementById('data-editor');
-        if (editor) { editor.removeAttribute('readonly'); editor.focus(); }
-    } else {
-        // 🟢 THE NATIVE CHECKOUT
+document.getElementById('edit-txt-btn').addEventListener('click', () => {
+    document.getElementById('edit-txt-btn').classList.add('hidden');
+    document.getElementById('edit-txt-tools').classList.remove('hidden');
+    const editor = document.querySelector('textarea');
+    if (editor) { editor.removeAttribute('readonly'); editor.focus(); }
+});
+
+document.getElementById('save-txt-btn').addEventListener('click', async () => {
+    const editor = document.querySelector('textarea');
+    if (!editor) return;
+    const saveBtn = document.getElementById('save-txt-btn');
+    saveBtn.innerText = "Saving...";
+    const newB64Content = btoa(unescape(encodeURIComponent(editor.value)));
+
+    try {
         const savedAuth = await window.api.getAuth();
-        const btn = document.getElementById('edit-btn');
-        btn.innerText = "Opening MS Office...";
-
-        const res = await window.api.checkoutDocument({
-            userId: savedAuth.userId, docId: currentActiveDocId, base64Content: rawDecryptedContent, fileName: currentFileName
-        });
-
+        const res = await window.api.saveTextEdits({ userId: savedAuth.userId, docId: currentActiveDocId, newB64Content: newB64Content });
         if (res.success) {
-            checkedOutPath = res.tempPath;
-            btn.innerText = "Check In & Close";
-            btn.style.background = "#dc3545"; // Turns red to remind them to close it
-            btn.id = "checkout-btn"; // Temporarily repurpose button
-
-            // Re-assign listener to Check-In
-            btn.addEventListener('click', async () => {
-                await window.api.checkinDocument(checkedOutPath);
-                alert("File Securely Removed from Local Drive!");
-                window.location.reload(); // Clean refresh
-            }, { once: true });
-        } else {
-            alert("Failed to checkout document.");
-            btn.innerText = "Edit in MS Office";
-        }
+            saveBtn.innerText = "✅ Saved!";
+            saveBtn.style.background = "#28a745";
+            setTimeout(() => {
+                document.getElementById('edit-txt-tools').classList.add('hidden');
+                loadSecureDocument(savedAuth.userId, currentActiveDocId);
+            }, 1000);
+        } else { throw new Error(res.error); }
+    } catch (error) {
+        saveBtn.innerText = "⚠️ Failed";
+        saveBtn.style.background = "#dc3545";
     }
 });
 
-// (Keep your existing text 'save-btn' logic here exactly as it was for pure text saving)
+document.getElementById('checkout-office-btn').addEventListener('click', async () => {
+    const savedAuth = await window.api.getAuth();
+    const btn = document.getElementById('checkout-office-btn');
 
-function showSystemReady(email) {
-    const authScreen = document.getElementById('auth-screen');
-    authScreen.classList.remove('hidden');
-    authScreen.innerHTML = `
-        <h2 style="color: #007acc;">System Ready</h2>
-        <p>Logged in as: <b>${email}</b></p>
-        <button id="open-file-btn" class="btn" style="background: #28a745; margin-top: 20px; width: 200px; font-weight: bold; font-size: 14px;">📂 Open .vdr File</button>
-        <br>
-        <button id="logout-btn" class="btn" style="background: #dc3545; margin-top: 15px; width: 200px;">Log Out</button>
-    `;
-    attachLogout();
-    document.getElementById('open-file-btn').addEventListener('click', async () => {
-        document.getElementById('open-file-btn').innerText = "Opening...";
-        const res = await window.api.openFileDialog();
-        if (res.success && res.docId) {
-            const savedAuth = await window.api.getAuth();
-            await loadSecureDocument(savedAuth.userId, res.docId);
-        } else {
-            document.getElementById('open-file-btn').innerText = "📂 Open .vdr File";
-            if (res.error) alert("Error opening file: " + res.error);
-        }
-    });
-}
+    if (btn.innerText.includes("Close Office")) {
+        btn.innerText = "Cleaning Drive...";
+        await window.api.checkinOfficeDoc(checkedOutPath);
+        loadSecureDocument(savedAuth.userId, currentActiveDocId);
+        return;
+    }
 
-function attachLogout() {
-    document.getElementById('logout-btn').addEventListener('click', async () => {
-        if (currentLogId) window.api.closeLog(currentLogId);
-        await window.api.clearAuth(); window.location.reload();
-    });
-}
+    btn.innerText = "Opening MS Office...";
+    const res = await window.api.checkoutOfficeDoc({ userId: savedAuth.userId, docId: currentActiveDocId, base64Content: rawDecryptedContent, fileName: currentFileName });
+
+    if (res.success) {
+        checkedOutPath = res.tempPath;
+        btn.innerText = "🔒 Cancel / Close Office";
+        btn.style.background = "#dc3545";
+    } else {
+        btn.innerText = "📝 Edit in MS Office";
+    }
+});
+
 document.addEventListener('DOMContentLoaded', initApp);
 
 
@@ -205,6 +233,447 @@ document.addEventListener('DOMContentLoaded', initApp);
 
 
 
+
+
+
+
+
+
+
+
+// //removed maooth and formating old styles above code is all rounder perfect one this is faulty
+// // renderer.js
+// window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// let currentActiveDocId = null;
+// let currentExtension = "";
+// let currentLogId = null;
+// let rawDecryptedContent = null;
+// let currentFileName = "";
+// let checkedOutPath = null;
+
+// async function initApp() {
+//     if (!window.api) return console.error("Bridge missing");
+
+//     // 🔥 AUTOMATIC RELOAD: When MS Office is killed, this triggers
+//     window.api.onSyncSuccess(async (msg) => {
+//         const btn = document.getElementById('checkout-office-btn');
+//         if (btn) {
+//             btn.innerText = "✅ Saved! Closing Office...";
+//             btn.style.background = "#28a745";
+//         }
+//         // Seamlessly reload the document back into the viewer
+//         setTimeout(async () => {
+//             const savedAuth = await window.api.getAuth();
+//             loadSecureDocument(savedAuth.userId, currentActiveDocId);
+//         }, 1500);
+//     });
+
+//     await checkAutoLogin();
+// }
+
+// async function checkAutoLogin() {
+//     const savedAuth = await window.api.getAuth();
+//     if (savedAuth && savedAuth.email && savedAuth.password) {
+//         document.getElementById('login-screen').classList.add('hidden');
+//         showSystemReady(savedAuth.email);
+//     } else {
+//         document.getElementById('login-screen').classList.remove('hidden');
+//     }
+// }
+
+// document.getElementById('login-btn').addEventListener('click', async () => {
+//     const email = document.getElementById('email').value.trim();
+//     const password = document.getElementById('password').value.trim();
+//     if (!email || !password) return;
+//     document.getElementById('login-error').innerText = "Authenticating...";
+//     const res = await window.api.login({ email, password });
+//     if (res.success) {
+//         await window.api.saveAuth({ email, password, userId: res.userId });
+//         document.getElementById('login-screen').classList.add('hidden');
+//         showSystemReady(email);
+//     } else { document.getElementById('login-error').innerText = res.message; }
+// });
+
+// function showSystemReady(email) {
+//     document.getElementById('auth-screen').classList.remove('hidden');
+//     document.getElementById('main-app').classList.add('hidden');
+//     document.getElementById('user-email-display').innerText = email;
+// }
+
+// document.getElementById('logout-btn').addEventListener('click', async () => {
+//     if (currentLogId) window.api.closeLog(currentLogId);
+//     await window.api.clearAuth(); window.location.reload();
+// });
+
+// document.getElementById('open-file-btn').addEventListener('click', async () => {
+//     const btn = document.getElementById('open-file-btn');
+//     btn.innerText = "Opening File Explorer...";
+
+//     const res = await window.api.openFileDialog();
+//     if (res.success && res.docId) {
+//         btn.innerText = "Decrypting File...";
+//         const savedAuth = await window.api.getAuth();
+//         await loadSecureDocument(savedAuth.userId, res.docId);
+//         btn.innerText = "📂 Browse & Open .vdr File";
+//     } else {
+//         btn.innerText = "📂 Browse & Open .vdr File";
+//         if (res.error) alert("Error opening file: " + res.error);
+//     }
+// });
+
+// document.getElementById('close-file-btn').addEventListener('click', () => {
+//     if (currentLogId) window.api.closeLog(currentLogId);
+//     document.getElementById('main-app').classList.add('hidden');
+//     document.getElementById('auth-screen').classList.remove('hidden');
+// });
+
+// async function loadSecureDocument(userId, docId) {
+//     document.getElementById('auth-screen').classList.add('hidden');
+//     document.getElementById('main-app').classList.remove('hidden');
+
+//     document.getElementById('edit-txt-btn').classList.add('hidden');
+//     document.getElementById('edit-txt-tools').classList.add('hidden');
+//     document.getElementById('checkout-office-btn').classList.add('hidden');
+//     document.getElementById('doc-title').innerText = "Loading...";
+
+//     const response = await window.api.verifyAccess({ userId, docId });
+
+//     if (response.success) {
+//         currentLogId = response.logId;
+//         currentActiveDocId = docId;
+//         rawDecryptedContent = response.content;
+//         currentFileName = response.fileName;
+
+//         document.getElementById('doc-title').innerText = currentFileName;
+//         const container = document.getElementById('viewer-container');
+//         container.classList.add('read-only-mode');
+
+//         const binaryString = atob(response.content);
+//         let ext = response.fileName.includes('.') ? response.fileName.split('.').pop().toLowerCase() : '';
+
+//         if (binaryString.startsWith("%PDF")) ext = 'pdf';
+//         else if (binaryString.startsWith("PK")) {
+//             if (binaryString.includes("word/document.xml")) ext = 'docx';
+//             else if (binaryString.includes("xl/worksheets")) ext = 'xlsx';
+//         } else if (binaryString.trim().startsWith("<html") || binaryString.trim().startsWith("<!DOCTYPE html>")) ext = 'html';
+
+//         currentExtension = ext;
+
+//         if (ext === 'pdf') {
+//             const pdfDataUri = `data:application/pdf;base64,${response.content}#toolbar=0&navpanes=0`;
+//             container.innerHTML = `<iframe src="${pdfDataUri}" width="100%" height="100%" style="border: none;" allowfullscreen></iframe>`;
+//         } else if (ext === 'docx' || ext === 'doc') {
+//             const bytes = new Uint8Array(binaryString.length);
+//             for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+//             try {
+//                 const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+
+//                 // 🔥 CSS FIX: Added `height: auto` so it grows dynamically and stops text overlap!
+//                 container.innerHTML = `<div style="width: 100%; display: flex; justify-content: center; background-color: #1e1e1e; padding: 20px;"><div id="data-editor" style="background: white !important; color: black !important; padding: 40px 60px; width: 210mm; min-height: 297mm; height: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.8); font-family: Arial, sans-serif; line-height: 1.6; text-align: left; overflow-wrap: break-word;">${res.value}</div></div>`;
+//             } catch (e) { container.innerHTML = `<div style="color:red;">Failed to render Word Doc.</div>`; }
+//         } else if (ext === 'xlsx' || ext === 'csv' || ext === 'xls') {
+//             try {
+//                 const workbook = XLSX.read(response.content, { type: 'base64' });
+//                 const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[workbook.SheetNames[0]]);
+//                 container.innerHTML = `<div id="data-editor" style="background: white; padding: 20px; width: 100%; height: 100%; overflow: auto;">${htmlStr}</div>`;
+//             } catch (e) { container.innerHTML = `<div style="color:red;">Failed to render Excel.</div>`; }
+//         } else {
+//             container.innerHTML = `<textarea id="data-editor" style="width: 90%; max-width: 800px; height: 90vh; background: #2d2d2d; color: white; padding: 30px; font-family: monospace; resize:none; outline: none; border:none;" readonly>${binaryString}</textarea>`;
+//         }
+
+//         // Setup Edit Controls
+//         if (response.canEdit) {
+//             if (ext === 'txt') {
+//                 document.getElementById('edit-txt-btn').classList.remove('hidden');
+//             } else if (ext === 'docx' || ext === 'doc' || ext === 'xlsx' || ext === 'xls') {
+//                 const checkBtn = document.getElementById('checkout-office-btn');
+//                 checkBtn.classList.remove('hidden');
+//                 checkBtn.innerText = "📝 Edit in MS Office";
+//                 checkBtn.style.background = "#007acc";
+//             }
+//         }
+
+//     } else {
+//         alert("Access Denied: " + response.error);
+//         document.getElementById('main-app').classList.add('hidden');
+//         document.getElementById('auth-screen').classList.remove('hidden');
+//     }
+// }
+
+// // TEXT EDITING
+// document.getElementById('edit-txt-btn').addEventListener('click', () => {
+//     document.getElementById('edit-txt-btn').classList.add('hidden');
+//     document.getElementById('edit-txt-tools').classList.remove('hidden');
+//     const editor = document.getElementById('data-editor');
+//     if (editor) { editor.removeAttribute('readonly'); editor.focus(); }
+// });
+
+// document.getElementById('save-txt-btn').addEventListener('click', async () => {
+//     const editor = document.getElementById('data-editor');
+//     if (!editor) return;
+//     const saveBtn = document.getElementById('save-txt-btn');
+//     saveBtn.innerText = "Saving...";
+//     const newB64Content = btoa(unescape(encodeURIComponent(editor.value)));
+
+//     try {
+//         const savedAuth = await window.api.getAuth();
+//         const res = await window.api.saveTextEdits({ userId: savedAuth.userId, docId: currentActiveDocId, newB64Content: newB64Content });
+//         if (res.success) {
+//             saveBtn.innerText = "✅ Saved!";
+//             saveBtn.style.background = "#28a745";
+//             setTimeout(() => {
+//                 document.getElementById('edit-txt-tools').classList.add('hidden');
+//                 loadSecureDocument(savedAuth.userId, currentActiveDocId);
+//             }, 1000);
+//         } else { throw new Error(res.error); }
+//     } catch (error) { alert("Failed to save:\n" + error.message); }
+// });
+
+// // OFFICE CHECKOUT
+// document.getElementById('checkout-office-btn').addEventListener('click', async () => {
+//     const savedAuth = await window.api.getAuth();
+//     const btn = document.getElementById('checkout-office-btn');
+
+//     // Manual abort/check-in
+//     if (btn.innerText.includes("Close Office")) {
+//         btn.innerText = "Cleaning Drive...";
+//         await window.api.checkinOfficeDoc(checkedOutPath);
+//         loadSecureDocument(savedAuth.userId, currentActiveDocId);
+//         return;
+//     }
+
+//     btn.innerText = "Opening MS Office...";
+//     const res = await window.api.checkoutOfficeDoc({ userId: savedAuth.userId, docId: currentActiveDocId, base64Content: rawDecryptedContent, fileName: currentFileName });
+
+//     if (res.success) {
+//         checkedOutPath = res.tempPath;
+//         btn.innerText = "🔒 Cancel / Close Office";
+//         btn.style.background = "#dc3545";
+//     } else {
+//         alert("Failed to checkout document.");
+//         btn.innerText = "📝 Edit in MS Office";
+//     }
+// });
+
+// document.addEventListener('DOMContentLoaded', initApp);
+
+
+
+
+// // renderer.js
+// window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// let currentActiveDocId = null;
+// let currentExtension = "";
+// let currentLogId = null;
+// let rawDecryptedContent = null;
+// let currentFileName = "";
+// let checkedOutPath = null;
+
+// async function initApp() {
+//     if (!window.api) return console.error("Bridge missing");
+
+//     window.api.onSyncSuccess((msg) => {
+//         const btn = document.getElementById('checkout-office-btn');
+//         btn.innerText = "✅ Saved to Vault!";
+//         btn.style.background = "#28a745";
+//         setTimeout(() => { btn.innerText = "🔒 Check In & Close Office"; btn.style.background = "#dc3545"; }, 2500);
+//     });
+
+//     await checkAutoLogin();
+// }
+
+// async function checkAutoLogin() {
+//     const savedAuth = await window.api.getAuth();
+//     if (savedAuth && savedAuth.email && savedAuth.password) {
+//         document.getElementById('login-screen').classList.add('hidden');
+//         showSystemReady(savedAuth.email);
+//     } else {
+//         document.getElementById('login-screen').classList.remove('hidden');
+//     }
+// }
+
+// document.getElementById('login-btn').addEventListener('click', async () => {
+//     const email = document.getElementById('email').value.trim();
+//     const password = document.getElementById('password').value.trim();
+//     if (!email || !password) return;
+//     document.getElementById('login-error').innerText = "Authenticating...";
+//     const res = await window.api.login({ email, password });
+//     if (res.success) {
+//         await window.api.saveAuth({ email, password, userId: res.userId });
+//         document.getElementById('login-screen').classList.add('hidden');
+//         showSystemReady(email);
+//     } else { document.getElementById('login-error').innerText = res.message; }
+// });
+
+// function showSystemReady(email) {
+//     document.getElementById('auth-screen').classList.remove('hidden');
+//     document.getElementById('main-app').classList.add('hidden');
+//     document.getElementById('user-email-display').innerText = email;
+// }
+
+// document.getElementById('logout-btn').addEventListener('click', async () => {
+//     if (currentLogId) window.api.closeLog(currentLogId);
+//     await window.api.clearAuth(); window.location.reload();
+// });
+
+// document.getElementById('open-file-btn').addEventListener('click', async () => {
+//     const btn = document.getElementById('open-file-btn');
+//     btn.innerText = "Opening File Explorer...";
+
+//     const res = await window.api.openFileDialog();
+//     if (res.success && res.docId) {
+//         btn.innerText = "Decrypting File...";
+//         const savedAuth = await window.api.getAuth();
+//         await loadSecureDocument(savedAuth.userId, res.docId);
+//         btn.innerText = "📂 Browse & Open .vdr File";
+//     } else {
+//         btn.innerText = "📂 Browse & Open .vdr File";
+//     }
+// });
+
+// document.getElementById('close-file-btn').addEventListener('click', () => {
+//     if (currentLogId) window.api.closeLog(currentLogId);
+//     document.getElementById('main-app').classList.add('hidden');
+//     document.getElementById('auth-screen').classList.remove('hidden');
+// });
+
+// async function loadSecureDocument(userId, docId) {
+//     document.getElementById('auth-screen').classList.add('hidden');
+//     document.getElementById('main-app').classList.remove('hidden');
+
+//     document.getElementById('edit-txt-btn').classList.add('hidden');
+//     document.getElementById('edit-txt-tools').classList.add('hidden');
+//     document.getElementById('checkout-office-btn').classList.add('hidden');
+//     document.getElementById('doc-title').innerText = "Loading...";
+
+//     const response = await window.api.verifyAccess({ userId, docId });
+
+//     if (response.success) {
+//         currentLogId = response.logId;
+//         currentActiveDocId = docId;
+//         rawDecryptedContent = response.content;
+//         currentFileName = response.fileName;
+
+//         document.getElementById('doc-title').innerText = currentFileName;
+//         const container = document.getElementById('viewer-container');
+//         container.classList.add('read-only-mode');
+
+//         const binaryString = atob(response.content);
+//         let ext = response.fileName.includes('.') ? response.fileName.split('.').pop().toLowerCase() : '';
+
+//         if (binaryString.startsWith("%PDF")) ext = 'pdf';
+//         else if (binaryString.startsWith("PK")) {
+//             if (binaryString.includes("word/document.xml")) ext = 'docx';
+//             else if (binaryString.includes("xl/worksheets")) ext = 'xlsx';
+//         } else if (binaryString.trim().startsWith("<html") || binaryString.trim().startsWith("<!DOCTYPE html>")) ext = 'html';
+
+//         currentExtension = ext;
+
+//         if (ext === 'pdf') {
+//             const pdfDataUri = `data:application/pdf;base64,${response.content}#toolbar=0&navpanes=0`;
+//             container.innerHTML = `<iframe src="${pdfDataUri}" width="100%" height="100%" style="border: none;" allowfullscreen></iframe>`;
+//         } else if (ext === 'docx' || ext === 'doc') {
+//             const bytes = new Uint8Array(binaryString.length);
+//             for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+//             try {
+//                 const res = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+//                 container.innerHTML = `<div style="width: 100%; display: flex; justify-content: center; background-color: #1e1e1e; padding: 20px;"><div id="data-editor" style="background: white !important; color: black !important; padding: 60px; width: 210mm; min-height: 297mm; box-shadow: 0 4px 10px rgba(0,0,0,0.8); font-family: Arial, sans-serif; line-height: 1.6; text-align: left;">${res.value}</div></div>`;
+//             } catch (e) { container.innerHTML = `<div style="color:red;">Failed to render Word Doc.</div>`; }
+//         } else if (ext === 'xlsx' || ext === 'csv' || ext === 'xls') {
+//             try {
+//                 const workbook = XLSX.read(response.content, { type: 'base64' });
+//                 const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[workbook.SheetNames[0]]);
+//                 container.innerHTML = `<div id="data-editor" style="background: white; padding: 20px; width: 100%; height: 100%; overflow: auto;">${htmlStr}</div>`;
+//             } catch (e) { container.innerHTML = `<div style="color:red;">Failed to render Excel.</div>`; }
+//         } else {
+//             container.innerHTML = `<textarea id="data-editor" style="width: 90%; max-width: 800px; height: 90vh; background: #2d2d2d; color: white; padding: 30px; font-family: monospace; resize:none; outline: none; border:none;" readonly>${binaryString}</textarea>`;
+//         }
+
+//         if (response.canEdit) {
+//             if (ext === 'txt') {
+//                 document.getElementById('edit-txt-btn').classList.remove('hidden');
+//             } else if (ext === 'docx' || ext === 'doc' || ext === 'xlsx' || ext === 'xls') {
+//                 const checkBtn = document.getElementById('checkout-office-btn');
+//                 checkBtn.classList.remove('hidden');
+//                 checkBtn.innerText = "📝 Edit";
+//                 checkBtn.style.background = "#007acc";
+//             }
+//         }
+
+//     } else {
+//         document.getElementById('main-app').classList.add('hidden');
+//         document.getElementById('auth-screen').classList.remove('hidden');
+
+//         // 🔥 LOUD ERROR IF ACCESS DENIED (For User 2)
+//         document.getElementById('auth-screen').innerHTML += `
+//             <div style="margin-top: 20px; padding: 15px; background: rgba(220, 53, 69, 0.2); border: 1px solid #dc3545; border-radius: 5px;">
+//                 <h3 style="color: #dc3545; margin:0 0 10px 0;">Security Violation</h3>
+//                 <p style="margin:0; font-size: 14px;">${response.error}</p>
+//             </div>
+//         `;
+//     }
+// }
+
+// document.getElementById('edit-txt-btn').addEventListener('click', () => {
+//     document.getElementById('edit-txt-btn').classList.add('hidden');
+//     document.getElementById('edit-txt-tools').classList.remove('hidden');
+//     const editor = document.getElementById('data-editor');
+//     if (editor) { editor.removeAttribute('readonly'); editor.focus(); }
+// });
+
+// document.getElementById('save-txt-btn').addEventListener('click', async () => {
+//     const editor = document.getElementById('data-editor');
+//     if (!editor) return;
+//     const saveBtn = document.getElementById('save-txt-btn');
+//     saveBtn.innerText = "Saving...";
+//     const newB64Content = btoa(unescape(encodeURIComponent(editor.value)));
+
+//     try {
+//         const savedAuth = await window.api.getAuth();
+//         const res = await window.api.saveTextEdits({ userId: savedAuth.userId, docId: currentActiveDocId, newB64Content: newB64Content });
+//         if (res.success) {
+//             saveBtn.innerText = "✅ Saved!";
+//             saveBtn.style.background = "#28a745";
+//             setTimeout(() => {
+//                 document.getElementById('edit-txt-tools').classList.add('hidden');
+//                 loadSecureDocument(savedAuth.userId, currentActiveDocId);
+//             }, 1000);
+//         } else { throw new Error(res.error); }
+//     } catch (error) {
+//         saveBtn.innerText = "⚠️ Failed";
+//         saveBtn.style.background = "#dc3545";
+//     }
+// });
+
+// // 🔥 SILENT CHECKOUT FLOW
+// document.getElementById('checkout-office-btn').addEventListener('click', async () => {
+//     const savedAuth = await window.api.getAuth();
+//     const btn = document.getElementById('checkout-office-btn');
+
+//     if (btn.innerText.includes("Close Office")) {
+//         btn.innerText = "Cleaning Drive...";
+//         await window.api.checkinOfficeDoc(checkedOutPath);
+
+//         // Silently reload the new document in the UI
+//         loadSecureDocument(savedAuth.userId, currentActiveDocId);
+//         return;
+//     }
+
+//     btn.innerText = "Opening MS Office...";
+//     const res = await window.api.checkoutOfficeDoc({ userId: savedAuth.userId, docId: currentActiveDocId, base64Content: rawDecryptedContent, fileName: currentFileName });
+
+//     if (res.success) {
+//         checkedOutPath = res.tempPath;
+//         btn.innerText = "🔒 Check In & Close Office";
+//         btn.style.background = "#dc3545";
+//     } else {
+//         btn.innerText = "📝 Edit in MS Office";
+//     }
+// });
+
+// document.addEventListener('DOMContentLoaded', initApp);
 
 
 

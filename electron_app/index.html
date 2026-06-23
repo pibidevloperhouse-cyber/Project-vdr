@@ -3,7 +3,8 @@
 
 <head>
     <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; frame-src 'self' data: blob:;">
+        content="default-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://xxlawcufvetxygaqwoxi.supabase.co; frame-src 'self' data: blob:;">
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
@@ -67,7 +68,7 @@
             flex-direction: column;
         }
 
-        /* 🔥 THE NEW TAB WORKSPACE STYLES */
+        /* 🔥 MULTI-TAB WORKSPACE STYLES (No scrollbar arrows!) */
         #tab-bar {
             display: flex;
             gap: 5px;
@@ -77,6 +78,12 @@
             align-items: flex-end;
             background: #151515;
             border-bottom: 2px solid #333;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        #tab-bar::-webkit-scrollbar {
+            display: none;
         }
 
         .vdr-tab {
@@ -149,7 +156,6 @@
             position: relative;
         }
 
-        /* Ensures absolute watermark wrapper fits properly */
         .document-tab-container {
             width: 100%;
             height: 100%;
@@ -210,8 +216,6 @@
 </body>
 
 </html>
-
-
 
 
 <!-- <!DOCTYPE html>

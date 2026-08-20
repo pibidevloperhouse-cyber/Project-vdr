@@ -32,7 +32,7 @@ ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 # Provide DUMMY backend variables just to stop the build from crashing
 # (The real backend variables will be securely added in AWS later)
 ENV SUPABASE_SERVICE_ROLE_KEY="dummy"
-ENV DATABASE_URL="dummy"
+ENV DATABASE_URL="postgresql://dummy:dummy@dummy:5432/dummy"
 ENV CONVERTAPI_SECRET="dummy"
 
 RUN npm run build

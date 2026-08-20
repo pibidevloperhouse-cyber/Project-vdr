@@ -6,7 +6,7 @@ on:
       - deploy
 
 env:
-  AWS_REGION: us-east-1 # Change this if your AWS region is different
+  AWS_REGION: eu-north-1 # Change this if your AWS region is different
   ECR_REPOSITORY: vdr-project
   ECS_SERVICE: vdr-service
   ECS_CLUSTER: vdr-cluster

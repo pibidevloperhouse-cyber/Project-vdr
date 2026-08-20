@@ -17,7 +17,23 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Next.js telemetry is disabled
-ENV NEXT_TELEMETRY_DISABLED 1
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Accept build arguments from GitHub Actions
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG NEXT_PUBLIC_APP_URL
+
+# Provide PUBLIC environment variables so Next.js can bake them into the frontend
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+
+# Provide DUMMY backend variables just to stop the build from crashing
+# (The real backend variables will be securely added in AWS later)
+ENV SUPABASE_SERVICE_ROLE_KEY="dummy"
+ENV DATABASE_URL="dummy"
+ENV CONVERTAPI_SECRET="dummy"
 
 RUN npm run build
 

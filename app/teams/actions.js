@@ -96,3 +96,27 @@ export async function fetchUsersMinimal(companyId) {
     return { data: null, error: error.message };
   }
 }
+
+export async function updateUserStatus(userId, status) {
+  try {
+    const data = await db
+      .update(users)
+      .set({ status })
+      .where(eq(users.id, userId))
+      .returning();
+
+    return {
+      data: data[0] || null,
+      error: null
+    };
+  } catch (error) {
+    console.error("updateUserStatus error:", error);
+
+    return {
+      data: null,
+      error: error instanceof Error
+        ? error.message
+        : String(error)
+    };
+  }
+}

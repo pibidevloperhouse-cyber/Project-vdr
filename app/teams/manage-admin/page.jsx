@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/utils/supabase/client';
-import { fetchCompany, fetchUsers, fetchGroups, fetchUserGroups } from '../actions';
+import { fetchCompany, fetchUsers, fetchGroups, fetchUserGroups, updateUserStatus } from '../actions';
 
 export default function ManageAdminPage() {
   const [loading, setLoading] = useState(true);
@@ -162,20 +162,39 @@ export default function ManageAdminPage() {
 
   // Toggle admin status (Active <-> Inactive)
   const handleToggleStatus = async (admin) => {
-    const newStatus = admin.status === 'active' ? 'inactive' : 'active';
     try {
-      const { error } = await supabase
-        .from('users')
-        .update({ status: newStatus })
-        .eq('id', admin.id);
+      const newStatus =
+        admin.status === "active"
+          ? "suspended"
+          : "active";
 
-      if (error) throw error;
+      const { data, error } = await updateUserStatus(
+        admin.id,
+        newStatus
+      );
 
-      showToast(`Status updated successfully.`);
-      fetchData();
-    } catch (err) {
-      console.error('Error updating status:', err);
-      showToast('Failed to update status.', true);
+      if (error) {
+        throw new Error(error);
+      }
+
+      showToast(
+        `Administrator ${newStatus === "active"
+          ? "activated"
+          : "suspended"
+        } successfully.`
+      );
+
+      setContextMenu(null);
+
+      await fetchData();
+
+    } catch (error) {
+      console.error("Error updating status:", error);
+
+      showToast(
+        error.message || "Failed to update administrator status.",
+        true
+      );
     }
   };
 
@@ -199,7 +218,7 @@ export default function ManageAdminPage() {
     }
   };
 
-  
+
 
   // Export to CSV (Support selection or all)
   const handleExportCSV = () => {

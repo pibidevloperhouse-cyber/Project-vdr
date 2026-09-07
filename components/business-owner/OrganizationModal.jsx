@@ -16,11 +16,11 @@ export default function OrganizationModal({
   initialData,
   plans = [],
 }) {
-  const isEdit = !initialData?.id;
+  const isEdit = Boolean(initialData?.id);
 
   const [name, setName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
-  const [plan, setPlan] = useState('Pro');
+  const [plan, setPlan] = useState('Standard VDR');
   const [storageLimitGb, setStorageLimitGb] = useState(50);
   const [usersCount, setUsersCount] = useState(5);
   const [status, setStatus] = useState('active');
@@ -32,16 +32,16 @@ export default function OrganizationModal({
     if (initialData) {
       setName(initialData.name || '');
       setAdminEmail(initialData.adminEmail || '');
-      setPlan(initialData.plan || 'Pro');
+      setPlan(initialData.plan || 'Standard VDR');
       setStorageLimitGb(
         Math.round((initialData.storageLimitMb || 51200) / 1024)
       );
       setUsersCount(initialData.usersCount || 5);
-      setStatus(initialData.status || 'active');
+      setStatus(initialData.status || 'pending');
     } else {
       setName('');
       setAdminEmail('');
-      setPlan('Pro');
+      setPlan('Standard VDR');
       setStorageLimitGb(50);
       setUsersCount(5);
       setStatus('active');
@@ -97,7 +97,7 @@ export default function OrganizationModal({
             </div>
             <div>
               <h3 className="text-[16px] font-black text-slate-900 leading-tight">
-                {isEdit ? 'Provision New Tenant Organization' : 'Edit Tenant Organization'}
+                {isEdit ? 'Edit Tenant Organization' : 'Provision New Tenant Organization'}
               </h3>
               <p className="text-xs text-slate-500 font-medium">
                 Set customer branding, seat limits, and storage quotas
@@ -167,6 +167,7 @@ export default function OrganizationModal({
                 onChange={(e) => setPlan(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-[var(--brand)]"
               >
+                <option value="Standard VDR">Standard VDR</option>
                 <option value="Free">Free Tier</option>
                 <option value="Pro">Pro Plan</option>
                 <option value="Enterprise">Enterprise Plan</option>
@@ -183,7 +184,7 @@ export default function OrganizationModal({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-[var(--brand)]"
               >
                 <option value="active">Active</option>
-                <option value="trial">Trial Mode</option>
+                <option value="pending">Pending</option>
                 <option value="suspended">Suspended</option>
               </select>
             </div>
@@ -235,7 +236,7 @@ export default function OrganizationModal({
               className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-[var(--brand)] hover:bg-[var(--brand-dark)] text-white shadow-sm transition-all disabled:opacity-50"
             >
               <FaCheckCircle className="text-xs" />
-              <span>{isSubmitting ? 'Saving...' : isEdit ? 'Create Tenant Account' : 'Save Changes'}</span>
+              <span>{isSubmitting ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Tenant Account'}</span>
             </button>
           </div>
         </form>

@@ -25,6 +25,7 @@ export default function BrandingPage() {
 
   const [activeTheme, setActiveTheme] = useState(DEFAULT_BRAND);
   const [brandName, setBrandName] = useState('');
+  const [workspaceName, setWorkspaceName] = useState('');
   const [logoUrl, setLogoUrl] = useState(null);
   const [logoFile, setLogoFile] = useState(null);
 
@@ -68,6 +69,7 @@ export default function BrandingPage() {
           const data = json.data;
           setRecordId(data.id);
           setBrandName(data.brand_name ?? '');
+          setWorkspaceName(data.workspace_name ?? '');
           setLogoUrl(data.logo_url ?? null);
           setActiveTheme(data.active_theme ?? DEFAULT_BRAND);
           setAdminName(data.admin_name ?? '');
@@ -276,7 +278,7 @@ export default function BrandingPage() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-xl font-bold text-gray-900 tracking-tight">{brandName || 'My Workspace'}</h2>
+                <h2 className="text-xl font-bold text-gray-900 tracking-tight">{workspaceName || brandName || 'My Workspace'}</h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 bg-brand-soft text-brand rounded-md border border-gray-200/50 uppercase tracking-wider transition-colors duration-500">Workspace</span>
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-[14px] text-gray-500 mt-1.5 font-medium">

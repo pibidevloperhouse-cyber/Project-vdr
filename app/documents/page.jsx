@@ -140,24 +140,77 @@ function UnifiedWorkspace() {
         return mergedPerms[key]?.[action] === true;
     };
 
-    // ── SORTING & INDEXING ───────────────────────────────────────────────────
+    // ── SORTING & INDEXING (Standard VDR Hierarchical Engine) ────────────────
     const getActiveDisplayIndex = useCallback((f) => {
-        if (f.type !== 'folder') return f.index && f.index !== '99' ? f.index : '—';
-        const path = []; let curr = f; let depth = 0;
+        if (!f) return '—';
+
+        // 1. If it's a folder, recursively traverse parent folders to build hierarchical index e.g. 1.2.1
+        if (f.type === 'folder') {
+            const path = [];
+            let curr = f;
+            let depth = 0;
+            while (curr && depth < 10) {
+                path.unshift((curr.index || '1').toString().trim());
+                if (!curr.parentId || curr.parentId === 'root') break;
+                curr = files.find(x => x.id === curr.parentId);
+                depth++;
+            }
+            return path.join('.') || '—';
+        }
+
+        // 2. If it's a document:
+        // Case A: If doc already has a full dotted index (e.g. "1.1", "1.2.3") and not '99', use it
+        if (f.index && f.index !== '99' && f.index.toString().includes('.')) {
+            return f.index.toString().trim();
+        }
+
+        // Case B: If doc is in a parent folder, resolve parent folder's hierarchical index + doc suffix
+        if (f.parentId && f.parentId !== 'root') {
+            const parentFolder = files.find(x => x.id === f.parentId);
+            if (parentFolder) {
+                const parentPath = [];
+                let curr = parentFolder;
+                let depth = 0;
+                while (curr && depth < 10) {
+                    parentPath.unshift((curr.index || '1').toString().trim());
+                    if (!curr.parentId || curr.parentId === 'root') break;
+                    curr = files.find(x => x.id === curr.parentId);
+                    depth++;
+                }
+                const parentPrefix = parentPath.join('.');
+                const docSuffix = (f.index && f.index !== '99') ? f.index.toString().split('.').pop() : '1';
+                return parentPrefix ? `${parentPrefix}.${docSuffix}` : docSuffix;
+            }
+        }
+
+        // Case C: Root document
+        return f.index && f.index !== '99' ? f.index.toString().trim() : '1';
+    }, [files]);
+
+    const getLocationPath = useCallback((f) => {
+        if (!f || !f.parentId || f.parentId === 'root') return '/';
+        const pathNames = [];
+        let curr = files.find(x => x.id === f.parentId);
+        let depth = 0;
         while (curr && depth < 10) {
-            path.unshift((curr.index || '1').toString().trim());
+            pathNames.unshift(curr.name);
             if (!curr.parentId || curr.parentId === 'root') break;
             curr = files.find(x => x.id === curr.parentId);
             depth++;
         }
-        return path.join('.') || '—';
+        return pathNames.length > 0 ? `/${pathNames.join('/')}` : '/';
     }, [files]);
 
-    const sortItemsByIndex = (a, b) => {
+    const sortItemsByIndex = useCallback((a, b) => {
         const isAFolder = a.type === 'folder';
         const isBFolder = b.type === 'folder';
-        if (isAFolder && !isBFolder) return -1;
-        if (!isAFolder && isBFolder) return 1;
+        
+        // In active files view, folders appear first. In trash, sort purely by hierarchical index
+        if (currentView !== 'trash') {
+            if (isAFolder && !isBFolder) return -1;
+            if (!isAFolder && isBFolder) return 1;
+        }
+
         const compareIndexes = (idxA, idxB) => {
             const partsA = (idxA || '999999').toString().split('.').map(n => parseInt(n, 10) || 0);
             const partsB = (idxB || '999999').toString().split('.').map(n => parseInt(n, 10) || 0);
@@ -167,12 +220,13 @@ function UnifiedWorkspace() {
                 const numB = partsB[i] || 0;
                 if (numA !== numB) return numA - numB;
             }
-            return 0;
+            return (idxA || '').toString().localeCompare((idxB || '').toString());
         };
-        const idxCmp = compareIndexes(a.index, b.index);
+
+        const idxCmp = compareIndexes(a.displayIndex || a.index, b.displayIndex || b.index);
         if (idxCmp !== 0) return idxCmp;
         return a.name.localeCompare(b.name);
-    };
+    }, [currentView]);
 
     const currentItems = useMemo(() => {
         const raw = (() => {
@@ -181,12 +235,16 @@ function UnifiedWorkspace() {
             if (currentView === 'downloads') return files.filter(f => downloadedIds.has(f.id) && !deletedIds.has(f.id));
             return files.filter(f => f.parentId === currentFolderId && !deletedIds.has(f.id));
         })();
-        return raw.map(f => ({ ...f, displayIndex: getActiveDisplayIndex(f) }));
-    }, [currentFolderId, files, currentView, deletedIds, bookmarkedIds, downloadedIds, getActiveDisplayIndex]);
+        return raw.map(f => ({ 
+            ...f, 
+            displayIndex: getActiveDisplayIndex(f),
+            locationPath: getLocationPath(f)
+        }));
+    }, [currentFolderId, files, currentView, deletedIds, bookmarkedIds, downloadedIds, getActiveDisplayIndex, getLocationPath]);
 
     const filteredItems = useMemo(() => {
         return currentItems.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase())).sort(sortItemsByIndex);
-    }, [currentItems, searchQuery]);
+    }, [currentItems, searchQuery, sortItemsByIndex]);
 
     const breadcrumbPath = useMemo(() => {
         const path = []; let id = currentFolderId;
@@ -876,6 +934,7 @@ function UnifiedWorkspace() {
                                     <th className="py-4 px-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center">Version</th>
                                     {currentView === 'trash' ? (
                                         <>
+                                            <th className="py-4 px-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Original Location</th>
                                             <th className="py-4 px-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Deleted By</th>
                                             <th className="py-4 px-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Deleted At</th>
                                             <th className="py-4 px-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center">Days Left</th>
@@ -916,14 +975,16 @@ function UnifiedWorkspace() {
                                             {/* 🔥 THE NAME COLUMN - Fully Restored */}
                                             <td className="py-4 px-3" onClick={isFolder ? (e) => { e.stopPropagation(); setCurrentFolderId(item.id); } : undefined}>
                                                 <div className="flex items-center gap-3">
-                                                    <div 
-                                                        draggable
-                                                        onDragStart={(e) => { e.stopPropagation(); handleDragStart(e, item, 'reorder'); }}
-                                                        className="cursor-grab active:cursor-grabbing hover:bg-slate-200 p-1 rounded text-slate-400 hover:text-slate-600 transition-colors mr-1 flex items-center justify-center"
-                                                        title="Drag here to reorder"
-                                                    >
-                                                        <FaGripVertical size={14} />
-                                                    </div>
+                                                    {currentView === 'files' && (
+                                                        <div 
+                                                            draggable
+                                                            onDragStart={(e) => { e.stopPropagation(); handleDragStart(e, item, 'reorder'); }}
+                                                            className="cursor-grab active:cursor-grabbing hover:bg-slate-200 p-1 rounded text-slate-400 hover:text-slate-600 transition-colors mr-1 flex items-center justify-center"
+                                                            title="Drag here to reorder"
+                                                        >
+                                                            <FaGripVertical size={14} />
+                                                        </div>
+                                                    )}
                                                     {isFolder ? (
                                                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="#fcd34d"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" /></svg>
                                                     ) : (
@@ -933,7 +994,7 @@ function UnifiedWorkspace() {
                                                     <span
                                                         className={`text-[13px] font-semibold transition-colors ${!isFolder && canUser('can_view', item) ? 'text-slate-800 hover:text-[var(--brand)] hover:underline cursor-pointer' : isFolder ? 'text-slate-800 hover:text-[var(--brand)] hover:underline cursor-pointer' : 'text-slate-800'}`}
                                                         onClick={(e) => {
-                                                            e.stopPropagation(); 
+                                                             e.stopPropagation(); 
                                                             if (isFolder) {
                                                                 setCurrentFolderId(item.id);
                                                             } else {
@@ -966,13 +1027,18 @@ function UnifiedWorkspace() {
                                             <td className="py-4 px-3 text-[12px] font-medium text-slate-500 text-center">V{item.version || 1}</td>
                                             {currentView === 'trash' ? (
                                                 <>
+                                                    <td className="py-4 px-3 text-[12px] font-medium text-slate-500">
+                                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-mono text-[11px] max-w-[220px] truncate" title={item.locationPath || '/'}>
+                                                            {item.locationPath || '/'}
+                                                        </span>
+                                                    </td>
                                                     <td className="py-4 px-3 text-[12px] font-medium text-slate-500">{item.deletedBy}</td>
                                                     <td className="py-4 px-3 text-[12px] font-medium text-slate-500">{item.deletedAt}</td>
                                                     <td className="py-4 px-3 text-center">
                                                         {(() => {
-                                                            const { daysLeft } = calculateRemainingDays(item.deletedAt, 30);
+                                                            const { daysLeft } = calculateRemainingDays(item.deletedAt, retentionDays || 30);
                                                             return (
-                                                                <span className="text-[13px] font-medium text-slate-500">
+                                                                <span className={`text-[11.5px] font-bold px-2.5 py-0.5 rounded-full ${daysLeft <= 5 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
                                                                     {daysLeft} days
                                                                 </span>
                                                             );

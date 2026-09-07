@@ -41,9 +41,9 @@ export async function GET() {
         name: company.name,
         adminEmail: company.email,
         usersCount: usersCount,
-        plan: company.plan_name || 'Standard VDR',
-        status: company.status,
-        storageUsedMb: 0, // Placeholder, actual storage calculation requires file tracking
+        plan: company.plan_name || sub.plan_name || 'Standard VDR',
+        status: company.status || 'pending',
+        storageUsedMb: 0,
         storageLimitMb: sub.storage_limit_mb || 0,
         createdAt: company.created_at,
       };
@@ -73,11 +73,11 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
     }
 
-    // In the BO dashboard, the PUT is used for Edit OR Approval.
-    // If the BO is "Approving" the company:
     const updateData = {};
+    if (body.name) updateData.name = body.name;
+    if (body.adminEmail) updateData.email = body.adminEmail;
     if (body.status) updateData.status = body.status;
-    // other fields can be updated as needed
+    if (body.plan) updateData.plan_name = body.plan;
     
     // Update Company
     const { data: updatedCompany, error: updateErr } = await supabaseAdmin
@@ -89,17 +89,18 @@ export async function PUT(request) {
 
     if (updateErr) throw updateErr;
 
-    // Update Subscription (Storage, Users Limit, Status)
-    if (body.status === 'active') {
+    // Update Subscription (Storage, Status)
+    if (body.storageLimitMb !== undefined || body.status) {
       await supabaseAdmin
         .from('subscriptions')
         .update({
-           plan_status: 'active',
-           // Note: if the BO dashboard sent updated storageLimitMb, we'd update it here:
-           storage_limit_mb: body.storageLimitMb,
+          ...(body.storageLimitMb !== undefined && { storage_limit_mb: body.storageLimitMb }),
+          ...(body.status && { plan_status: body.status }),
         })
         .eq('company_id', body.id);
+    }
         
+    if (body.status === 'active') {
       // Update Users status to active for this company
       await supabaseAdmin
         .from('users')

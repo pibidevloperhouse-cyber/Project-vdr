@@ -10,16 +10,21 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const email = searchParams.get("email");
+    const phone = searchParams.get("phone");
 
-    if (!email) {
-      return NextResponse.json({ error: "Email is required" }, { status: 400 });
+    if (!email && !phone) {
+      return NextResponse.json({ error: "Email or phone is required" }, { status: 400 });
     }
 
-    const { data: user, error } = await supabase
-      .from("users")
-      .select("id")
-      .eq("email", email)
-      .single();
+    let query = supabase.from("users").select("id");
+    if (email) {
+      query = query.eq("email", email.trim().toLowerCase());
+    }
+    if (phone) {
+      query = query.eq("phone_number", phone.trim());
+    }
+
+    const { data: user, error } = await query.single();
 
     if (error && error.code !== "PGRST116") {
       console.error("Check user error:", error);

@@ -59,6 +59,7 @@ export async function POST(req) {
 
             const responseData = wsData || {};
             responseData.brand_name = responseData.brand_name || defaultBrandName;
+            responseData.workspace_name = defaultBrandName;
             responseData.admin_name = responseData.admin_name || defaultAdminName;
             responseData.admin_email = responseData.admin_email || defaultAdminEmail;
             responseData.admin_phone = responseData.admin_phone || defaultAdminPhone;

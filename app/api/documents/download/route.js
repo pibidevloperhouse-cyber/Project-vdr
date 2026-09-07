@@ -114,7 +114,7 @@ export async function POST(req) {
             const backendUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
             // Generate the HTML with watermark script injected
-            const htmlContent = generateSecureHtmlWrapper(targetDocumentId, doc.name, fileExt, encryptedPayload, backendUrl, watermarkSettings, brandLogo);
+            const htmlContent = generateSecureHtmlWrapper(targetDocumentId, doc.name, fileExt, encryptedPayload, backendUrl, watermarkSettings, brandLogo, user.email);
 
             // Log download edit action
             await supabase.from('document_edit_logs').insert([{

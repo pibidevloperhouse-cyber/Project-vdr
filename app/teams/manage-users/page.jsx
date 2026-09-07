@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/utils/supabase/client';
-import { fetchCompany, fetchUsers, fetchGroups, fetchUserGroups } from '../actions';
+import { fetchCompany, fetchUsers, fetchGroups, fetchUserGroups, updateUserStatus } from '../actions';
 
 export default function ManageUsersPage() {
   const [loading, setLoading] = useState(true);
@@ -159,20 +159,36 @@ export default function ManageUsersPage() {
 
   // Toggle user status (Active <-> Inactive)
   const handleToggleStatus = async (user) => {
-    const newStatus = user.status === 'active' ? 'inactive' : 'active';
     try {
-      const { error } = await supabase
-        .from('users')
-        .update({ status: newStatus })
-        .eq('id', user.id);
+      const newStatus =
+        user.status === "active"
+          ? "suspended"
+          : "active";
 
-      if (error) throw error;
+      const { data, error } = await updateUserStatus(
+        user.id,
+        newStatus
+      );
 
-      showToast(`User status updated successfully.`);
-      fetchData();
-    } catch (err) {
-      console.error('Error updating status:', err);
-      showToast('Failed to update status.', true);
+      if (error) {
+        throw new Error(error);
+      }
+
+      showToast(
+        `User ${newStatus === "active" ? "activated" : "suspended"} successfully.`
+      );
+
+      setContextMenu(null);
+
+      await fetchData();
+
+    } catch (error) {
+      console.error("Error updating status:", error);
+
+      showToast(
+        error.message || "Failed to update user status.",
+        true
+      );
     }
   };
 

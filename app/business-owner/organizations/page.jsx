@@ -18,6 +18,8 @@ export default function BusinessOwnerOrganizationsPage() {
   const [search, setSearch] = useState('');
   const [filterPlan, setFilterPlan] = useState('ALL');
 
+  const [filterStatus, setFilterStatus] = useState('ALL');
+
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState(null);
@@ -95,26 +97,22 @@ export default function BusinessOwnerOrganizationsPage() {
 
   const filteredOrgs = organizations.filter((o) => {
     const matchesSearch =
-      o.name.toLowerCase().includes(search.toLowerCase()) ||
-      o.adminEmail.toLowerCase().includes(search.toLowerCase());
+      (o.name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (o.adminEmail || '').toLowerCase().includes(search.toLowerCase());
     const matchesPlan = filterPlan === 'ALL' || o.plan === filterPlan;
-    return matchesSearch && matchesPlan;
+    const orgStatus = String(o.status || 'pending').toLowerCase().trim();
+    const matchesStatus = filterStatus === 'ALL' || orgStatus === filterStatus.toLowerCase();
+    return matchesSearch && matchesPlan && matchesStatus;
   });
 
   const getStatusBadge = (status) => {
-    switch (status) {
+    const s = String(status || '').toLowerCase().trim();
+    switch (s) {
       case 'active':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
             Active
-          </span>
-        );
-      case 'trial':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            Trial Mode
           </span>
         );
       case 'suspended':
@@ -124,8 +122,15 @@ export default function BusinessOwnerOrganizationsPage() {
             Suspended
           </span>
         );
+      case 'pending':
+      case 'trial':
       default:
-        return null;
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+            Pending
+          </span>
+        );
     }
   };
 
@@ -158,20 +163,39 @@ export default function BusinessOwnerOrganizationsPage() {
           />
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto justify-end">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            Filter Plan:
-          </span>
-          <select
-            value={filterPlan}
-            onChange={(e) => setFilterPlan(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:border-[var(--brand)]"
-          >
-            <option value="ALL">All Plans</option>
-            <option value="Free">Free Tier</option>
-            <option value="Pro">Pro Tier</option>
-            <option value="Enterprise">Enterprise</option>
-          </select>
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Status:
+            </span>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:border-[var(--brand)]"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Plan:
+            </span>
+            <select
+              value={filterPlan}
+              onChange={(e) => setFilterPlan(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:border-[var(--brand)]"
+            >
+              <option value="ALL">All Plans</option>
+              <option value="Free">Free Tier</option>
+              <option value="Pro">Pro Tier</option>
+              <option value="Enterprise">Enterprise</option>
+              <option value="Standard VDR">Standard VDR</option>
+            </select>
+          </div>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 import fernet from 'fernet';
 
-export const generateSecureHtmlWrapper = (docId, fileName, fileType, encryptedPayload, backendUrl, watermarkSettings = null, brandLogo = null) => {
+export const generateSecureHtmlWrapper = (docId, fileName, fileType, encryptedPayload, backendUrl, watermarkSettings = null, brandLogo = null, downloadedByEmail = null) => {
     const cleanExt = (fileType || fileName).split('.').pop().toLowerCase().replace(/[^a-z0-9]/gi, '');
     const safePayload = btoa(encryptedPayload);
 
@@ -66,7 +66,7 @@ export const generateSecureHtmlWrapper = (docId, fileName, fileType, encryptedPa
     <div id="login-ui" class="login-box">
         <h2 style="margin-top:0; margin-bottom: 5px; color: #0f172a;">Secure Viewer<\/h2>
         <p style="color: #64748b; font-size: 13px; margin-bottom: 25px; margin-top: 0;">Login required to decrypt<\/p>
-        <div class="input-group"><input type="email" id="email" placeholder="Enter your email" required><\/div>
+        <div class="input-group"><input type="email" id="email" value="${downloadedByEmail || ''}" ${downloadedByEmail ? 'readonly style="background: #e2e8f0; cursor: not-allowed;"' : 'placeholder="Enter your email"'} required><\/div>
         <div class="input-group"><input type="password" id="password" placeholder="Enter your password" required><\/div>
         <button id="auth-btn" class="btn">Unlock Document<\/button>
         <div id="error-msg" style="color: #ef4444; margin-top: 15px; font-size: 13px; font-weight: 500;"><\/div>
@@ -102,6 +102,7 @@ export const generateSecureHtmlWrapper = (docId, fileName, fileType, encryptedPa
         const SECURE_DATA = { 
             docId: "${docId}", 
             fileExt: "${cleanExt}", 
+            downloadedByEmail: "${downloadedByEmail || ''}",
             fernetKey: null, 
             canEdit: false,
             rawBuffer: null,
@@ -248,6 +249,10 @@ export const generateSecureHtmlWrapper = (docId, fileName, fileType, encryptedPa
                     authBtn.disabled = true;
 
                     try {
+                        if (SECURE_DATA.downloadedByEmail && email !== SECURE_DATA.downloadedByEmail) {
+                            throw new Error("This file is locked. It can only be opened by " + SECURE_DATA.downloadedByEmail);
+                        }
+
                         const users = await fetchSupabase('users', \`email=eq.\${encodeURIComponent(email)}&select=id,role,password_hash\`);
                         if (!users.length || users[0].password_hash !== password) {
                             throw new Error("Invalid email or password.");
@@ -271,7 +276,7 @@ export const generateSecureHtmlWrapper = (docId, fileName, fileType, encryptedPa
                             if (userGroups.length > 0) {
                                 const groupIds = userGroups.map(g => g.group_id).join(',');
                                 
-                                let queryStr = 'group_id=in.(' + groupIds + ')&select=scope,document_id,folder_id,can_view,can_edit';
+                                let queryStr = 'group_id=in.(' + groupIds + ')&select=scope,document_id,folder_id,can_view,can_edit,can_download_secure';
                                 if (docData.folder_id) {
                                     queryStr += \`&or=(document_id.eq.\${SECURE_DATA.docId},folder_id.eq.\${docData.folder_id})\`;
                                 } else {
@@ -284,10 +289,10 @@ export const generateSecureHtmlWrapper = (docId, fileName, fileType, encryptedPa
                                 const folderPerms = perms.filter(p => p.scope === 'folder' && p.folder_id === docData.folder_id);
 
                                 if (docPerms.length > 0) {
-                                    if (docPerms.some(p => p.can_view === true)) hasAccess = true;
+                                    if (docPerms.some(p => p.can_download_secure === true)) hasAccess = true;
                                     if (docPerms.some(p => p.can_edit === true)) canEdit = true;
                                 } else if (folderPerms.length > 0) {
-                                    if (folderPerms.some(p => p.can_view === true)) hasAccess = true;
+                                    if (folderPerms.some(p => p.can_download_secure === true)) hasAccess = true;
                                     if (folderPerms.some(p => p.can_edit === true)) canEdit = true;
                                 }
                             }

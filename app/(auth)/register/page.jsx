@@ -4,8 +4,9 @@ import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/utils/supabase/client";
-import { FaUser, FaEnvelope, FaLock, FaEye, FaEyeSlash, FaCheckCircle, FaShieldAlt, FaBuilding } from "react-icons/fa";
+import { FaUser, FaEnvelope, FaLock, FaEye, FaEyeSlash, FaCheckCircle, FaShieldAlt, FaBuilding, FaSearch, FaCaretDown, FaSpinner, FaTimesCircle } from "react-icons/fa";
 import { FiShield } from "react-icons/fi";
+import { countries, normalizePhoneNumber, formatPhoneDisplay } from "@/utils/countries";
 
 // =========================================================================
 // 1. INVITE REGISTRATION COMPONENT (FOR USERS WITH A TOKEN)
@@ -439,18 +440,88 @@ function CompanyRegisterContent() {
 
   const [companyName, setCompanyName] = useState("");
   const [adminName, setAdminName] = useState("");
-  const [adminEmail, setAdminEmail] = useState("");
-  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
-  const [otpCode, setOtpCode] = useState("");
-  const MOCK_OTP = "123456";
 
+  // Email state
+  const [adminEmail, setAdminEmail] = useState("");
+  const [emailStatus, setEmailStatus] = useState("idle"); // idle | checking | available | exists | invalid
+  
+  // Phone state
+  const [selectedCountry, setSelectedCountry] = useState(countries.find(c => c.code === "US"));
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const [countrySearch, setCountrySearch] = useState("");
+  const [phone, setPhone] = useState("");
+  const [phoneStatus, setPhoneStatus] = useState("idle"); // idle | checking | available | exists | invalid
+
+  const [otpCode, setOtpCode] = useState("");
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [countdown, setCountdown] = useState(60);
+
+  // Email debounce & check
+  useEffect(() => {
+    const emailStr = adminEmail.trim().toLowerCase();
+    if (!emailStr) {
+      setEmailStatus("idle");
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailStr)) {
+      setEmailStatus("invalid");
+      return;
+    }
+
+    setEmailStatus("checking");
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/user/check?email=${encodeURIComponent(emailStr)}`);
+        const data = await res.json();
+        if (data.exists) {
+          setEmailStatus("exists");
+        } else {
+          setEmailStatus("available");
+        }
+      } catch (err) {
+        setEmailStatus("idle");
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [adminEmail]);
+
+  // Phone debounce & check
+  useEffect(() => {
+    const phoneStr = phone.trim();
+    if (!phoneStr) {
+      setPhoneStatus("idle");
+      return;
+    }
+    
+    // minimal length check for local portion
+    const digits = phoneStr.replace(/\D/g, "");
+    if (digits.length < 5) {
+      setPhoneStatus("invalid");
+      return;
+    }
+
+    setPhoneStatus("checking");
+    const timer = setTimeout(async () => {
+      try {
+        const normalized = normalizePhoneNumber(selectedCountry.dialCode, phoneStr);
+        const res = await fetch(`/api/user/check?phone=${encodeURIComponent(normalized)}`);
+        const data = await res.json();
+        if (data.exists) {
+          setPhoneStatus("exists");
+        } else {
+          setPhoneStatus("available");
+        }
+      } catch (err) {
+        setPhoneStatus("idle");
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [phone, selectedCountry]);
 
   useEffect(() => {
     let timer;
@@ -487,8 +558,44 @@ function CompanyRegisterContent() {
       return;
     }
 
+    if (emailStatus === "invalid") {
+      setErrorMsg("Please enter a valid email address.");
+      return;
+    }
+    if (emailStatus === "exists") {
+      setErrorMsg("This email address is already registered.");
+      return;
+    }
+    if (emailStatus === "checking") {
+      setErrorMsg("Please wait while we verify your email.");
+      return;
+    }
+
+    if (phoneStatus === "invalid") {
+      setErrorMsg("Please enter a valid phone number.");
+      return;
+    }
+    if (phoneStatus === "exists") {
+      setErrorMsg("This phone number is already registered.");
+      return;
+    }
+    if (phoneStatus === "checking") {
+      setErrorMsg("Please wait while we verify your phone number.");
+      return;
+    }
+
     if (password.length < 6) {
       setErrorMsg("Password must be at least 6 characters long.");
+      return;
+    }
+    
+    // Check required cases
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+      setErrorMsg("Password must contain uppercase, lowercase, number, and special character.");
+      return;
+    }
+    if (password === adminEmail || password === adminName) {
+      setErrorMsg("Password must not equal your email or name.");
       return;
     }
 
@@ -581,6 +688,8 @@ function CompanyRegisterContent() {
     setSubmitting(true);
 
     try {
+      const normalizedPhone = normalizePhoneNumber(selectedCountry.dialCode, phone);
+
       const res = await fetch("/api/request-workspace", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -588,7 +697,7 @@ function CompanyRegisterContent() {
           companyName: companyName.trim(),
           adminName: adminName.trim(),
           adminEmail: adminEmail.trim(),
-          phone: phone.trim(),
+          phone: normalizedPhone,
           password,
           planId: selectedPlanId,
         }),
@@ -607,6 +716,11 @@ function CompanyRegisterContent() {
       setSubmitting(false);
     }
   };
+
+  const filteredCountries = countries.filter(c => 
+    c.name.toLowerCase().includes(countrySearch.toLowerCase()) || 
+    c.dialCode.includes(countrySearch)
+  );
 
   if (isSuccess) {
     return (
@@ -686,6 +800,8 @@ function CompanyRegisterContent() {
                     onChange={(e) => setCompanyName(e.target.value)}
                     disabled={submitting}
                     required
+                    minLength={2}
+                    maxLength={100}
                     className="w-full pl-11 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--brand)] transition disabled:bg-gray-100 placeholder-gray-400 text-gray-900 text-sm"
                   />
                 </div>
@@ -705,7 +821,7 @@ function CompanyRegisterContent() {
                     type="text"
                     placeholder="John Doe"
                     value={adminName}
-                    onChange={(e) => setAdminName(e.target.value)}
+                    onChange={(e) => setAdminName(e.target.value.replace(/[0-9!@#$%^&*()_+=\[\]{};':"\\|,.<>\/?]+/, ''))}
                     disabled={submitting}
                     required
                     className="w-full pl-11 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--brand)] transition disabled:bg-gray-100 placeholder-gray-400 text-gray-900 text-sm"
@@ -716,7 +832,7 @@ function CompanyRegisterContent() {
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">Admin Email Address</label>
                 <div className="relative">
-                  <FaEnvelope className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-base" />
+                  <FaEnvelope className={`absolute left-4 top-1/2 -translate-y-1/2 text-base ${emailStatus === 'invalid' || emailStatus === 'exists' ? 'text-red-400' : 'text-gray-400'}`} />
                   <input
                     type="email"
                     placeholder="name@company.com"
@@ -724,25 +840,107 @@ function CompanyRegisterContent() {
                     onChange={(e) => setAdminEmail(e.target.value)}
                     disabled={submitting}
                     required
-                    className="w-full pl-11 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--brand)] transition disabled:bg-gray-100 placeholder-gray-400 text-gray-900 text-sm"
+                    className={`w-full pl-11 pr-11 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--brand)] transition disabled:bg-gray-100 placeholder-gray-400 text-sm
+                      ${(emailStatus === 'invalid' || emailStatus === 'exists') ? 'border-red-300 bg-red-50 text-red-900 focus:ring-red-400' : 'border-gray-300 text-gray-900'}
+                      ${emailStatus === 'available' ? 'border-emerald-300 bg-emerald-50/20' : ''}
+                    `}
                   />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center justify-center">
+                    {emailStatus === 'checking' && <FaSpinner className="text-[var(--brand)] animate-spin" />}
+                    {emailStatus === 'available' && <FaCheckCircle className="text-emerald-500" />}
+                    {(emailStatus === 'invalid' || emailStatus === 'exists') && <FaTimesCircle className="text-red-500" />}
+                  </div>
                 </div>
+                {emailStatus === 'invalid' && <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1"><FaTimesCircle className="shrink-0"/> Please enter a valid email address.</p>}
+                {emailStatus === 'exists' && <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1"><FaTimesCircle className="shrink-0"/> This email address is already registered.</p>}
+                {emailStatus === 'checking' && <p className="text-[var(--brand)] text-xs mt-1.5 flex items-center gap-1"><FaSpinner className="animate-spin shrink-0"/> Checking email...</p>}
+                {emailStatus === 'available' && <p className="text-emerald-600 text-xs mt-1.5 flex items-center gap-1"><FaCheckCircle className="shrink-0"/> Email is available.</p>}
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">Phone Number</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-base">📞</span>
+                <div className={`relative flex rounded-xl border bg-white focus-within:ring-2 focus-within:ring-[var(--brand)] transition group
+                  ${(phoneStatus === 'invalid' || phoneStatus === 'exists') ? 'border-red-300 ring-red-400 focus-within:ring-red-400 bg-red-50' : 'border-gray-300'}
+                `}>
+                  
+                  {/* Country Selector Button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowCountryDropdown(!showCountryDropdown)}
+                    disabled={submitting}
+                    className="flex items-center gap-1.5 px-3 py-3 border-r border-gray-200 hover:bg-gray-50 transition rounded-l-xl text-sm min-w-fit"
+                  >
+                    <span className="text-lg">{selectedCountry?.flag}</span>
+                    <span className="text-gray-700 font-medium">{selectedCountry?.dialCode}</span>
+                    <FaCaretDown className="text-gray-400 text-xs ml-0.5" />
+                  </button>
+
+                  {/* Phone Input */}
                   <input
                     type="tel"
-                    placeholder="+91 98765 43210"
+                    placeholder="Phone number"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setPhone(formatPhoneDisplay(e.target.value))}
                     disabled={submitting}
                     required
-                    className="w-full pl-11 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--brand)] transition disabled:bg-gray-100 placeholder-gray-400 text-gray-900 text-sm"
+                    className={`flex-1 min-w-0 pl-3 pr-10 py-3 bg-transparent border-none focus:ring-0 focus:outline-none text-sm placeholder-gray-400 text-gray-900
+                      ${(phoneStatus === 'invalid' || phoneStatus === 'exists') ? 'text-red-900' : ''}
+                    `}
                   />
+                  
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center justify-center">
+                    {phoneStatus === 'checking' && <FaSpinner className="text-[var(--brand)] animate-spin" />}
+                    {phoneStatus === 'available' && <FaCheckCircle className="text-emerald-500" />}
+                    {(phoneStatus === 'invalid' || phoneStatus === 'exists') && <FaTimesCircle className="text-red-500" />}
+                  </div>
+
+                  {/* Dropdown Menu */}
+                  {showCountryDropdown && (
+                    <div className="absolute top-full left-0 mt-1 w-72 max-h-60 bg-white border border-gray-200 rounded-xl shadow-xl z-50 flex flex-col overflow-hidden">
+                      <div className="p-2 border-b border-gray-100 flex items-center gap-2">
+                        <FaSearch className="text-gray-400 text-xs ml-2 shrink-0" />
+                        <input
+                          type="text"
+                          autoFocus
+                          placeholder="Search country..."
+                          value={countrySearch}
+                          onChange={(e) => setCountrySearch(e.target.value)}
+                          className="w-full text-sm py-1.5 focus:outline-none text-gray-800"
+                        />
+                      </div>
+                      <div className="overflow-y-auto">
+                        {filteredCountries.length > 0 ? (
+                          filteredCountries.map((c) => (
+                            <button
+                              key={c.code}
+                              type="button"
+                              onClick={() => {
+                                setSelectedCountry(c);
+                                setShowCountryDropdown(false);
+                                setCountrySearch("");
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition text-left"
+                            >
+                              <span className="text-lg">{c.flag}</span>
+                              <span className="text-sm font-medium text-gray-800 flex-1">{c.name}</span>
+                              <span className="text-xs text-gray-500">{c.dialCode}</span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="px-4 py-3 text-sm text-gray-500 text-center">No countries found</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
+                {/* Overlay to close dropdown */}
+                {showCountryDropdown && (
+                  <div className="fixed inset-0 z-40" onClick={() => setShowCountryDropdown(false)}></div>
+                )}
+                
+                {phoneStatus === 'exists' && <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1"><FaTimesCircle className="shrink-0"/> This phone number is already registered.</p>}
+                {phoneStatus === 'invalid' && <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1"><FaTimesCircle className="shrink-0"/> Please enter a valid phone number.</p>}
+                {phoneStatus === 'available' && <p className="text-emerald-600 text-xs mt-1.5 flex items-center gap-1"><FaCheckCircle className="shrink-0"/> Phone number is available.</p>}
               </div>
 
               <div>
@@ -791,11 +989,14 @@ function CompanyRegisterContent() {
                     {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
                   </button>
                 </div>
+                {confirmPassword && password !== confirmPassword && (
+                  <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1"><FaTimesCircle/> Passwords do not match.</p>
+                )}
               </div>
 
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || emailStatus === 'checking' || phoneStatus === 'checking'}
                 className="w-full mt-6 py-3 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl transition-all duration-300 disabled:opacity-70 flex items-center justify-center gap-2 shadow-lg"
               >
                 {submitting ? (
@@ -997,7 +1198,6 @@ function CompanyRegisterContent() {
   );
 }
 
-// =========================================================================
 // 3. MAIN COMPONENT (SWITCHES BASED ON TOKEN)
 // =========================================================================
 function RegisterController() {
